@@ -37,6 +37,8 @@ test("MCP runner blocks remote mutations and local state writes", () => {
   );
   assert.doesNotThrow(() => validateMcpCommand("calendar day", ["--date", "2026-08-29"]));
   assert.doesNotThrow(() => validateMcpCommand("faculty search", ["vision"]));
+  assert.doesNotThrow(() => validateMcpCommand("mirror syllabus check", ["CS109"]));
+  assert.throws(() => validateMcpCommand("mirror syllabus download", ["CS109"]), /MCP_MUTATION_BLOCKED/);
   assert.throws(() => validateMcpCommand("profile show", []), /MCP_COMMAND_NOT_EXPOSED/);
   assert.throws(() => validateMcpCommand("context", []), /MCP_COMMAND_NOT_EXPOSED/);
   assert.throws(() => validateMcpCommand("wifi status", []), /MCP_COMMAND_NOT_EXPOSED/);
@@ -152,7 +154,7 @@ test("MCP exposes discovery, description, and a typed public-read allowlist", as
     );
     assert.ok(listed.tools.every((tool) => tool.name !== "sustech_run"));
     assert.ok(listed.tools.every((tool) => tool.annotations?.readOnlyHint === true));
-    assert.equal(listed.tools.length, 42);
+    assert.equal(listed.tools.length, 44);
     assert.ok(listed.tools.some((tool) => tool.name === "sustech_library_search_url"));
     assert.ok(listed.tools.some((tool) => tool.name === "sustech_online_manual_list"));
     assert.ok(listed.tools.some((tool) => tool.name === "sustech_online_manual_get"));
@@ -175,6 +177,20 @@ test("MCP exposes discovery, description, and a typed public-read allowlist", as
     const run = await client.callTool({ name: "sustech_version", arguments: {} });
     assert.equal(run.isError, undefined);
     assert.equal((run.structuredContent as { ok: boolean }).ok, true);
+
+    const syllabus = await client.callTool({
+      name: "sustech_mirror_syllabus_url",
+      arguments: { courseCode: "cs109" },
+    });
+    assert.equal(syllabus.isError, undefined);
+    const syllabusData = (syllabus.structuredContent as { data: { courseCode: string; availability: string } }).data;
+    assert.equal(syllabusData.courseCode, "CS109");
+    assert.equal(syllabusData.availability, "unchecked");
+    const invalidSyllabus = await client.callTool({
+      name: "sustech_mirror_syllabus_check",
+      arguments: { courseCode: "../private" },
+    });
+    assert.equal(invalidSyllabus.isError, true);
 
     const invalidManualWindow = await client.callTool({
       name: "sustech_online_search",

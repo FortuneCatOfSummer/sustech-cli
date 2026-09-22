@@ -14,6 +14,8 @@ export const PUBLIC_MCP_TOOL_BY_COMMAND = {
   "resources search": "sustech_resources_search",
   "services status": "sustech_services_status",
   "papers search": "sustech_papers_search",
+  "mirror syllabus url": "sustech_mirror_syllabus_url",
+  "mirror syllabus check": "sustech_mirror_syllabus_check",
   "nces browse": "sustech_nces_browse",
   "nces filter-options": "sustech_nces_filter_options",
   "nces global-stats": "sustech_nces_global_stats",

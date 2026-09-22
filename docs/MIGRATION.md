@@ -39,6 +39,29 @@ fixture-tested only.
 
 ## Porting order
 
+### Upstream follow-up, 2026-09-22
+
+Compared against `dumixthestpd/sustech_survival` through
+[`acd2032` (2026-09-20)](https://github.com/dumixthestpd/sustech_survival/commit/acd20323af6d3bc91c3e89974283d39d85109678).
+The original Python checkout remains unchanged.
+
+| Upstream change | TypeScript follow-up |
+| --- | --- |
+| Public syllabus mirror, September 6 | `mirror syllabus url/check/download`, guarded PDF writes, and read-only MCP tools. See [Syllabus access](SYLLABUS.md). PDF-to-text and OCR remain outside this port. |
+| Current plus historical courses, September 4–5 | `tis enrolled --all` groups current enrollment and grade-free course history by semester. It is mutually exclusive with `--semester`. JSON and JSONL retain source availability; missing or ambiguous records are not guessed. |
+| Calendar-backed reporting, September 20 | Existing context/ICS holiday, makeup, and future-class behavior is retained. Date-specific schedules now use the same actual occurrences, January context resolves the previous fall term, and duplicate blocks no longer duplicate reminders. |
+| TIS timetable parsing | Recover course codes from recognized RWH identifiers. Treat KEY as a display-block identifier, using actual period fields or schedule descriptions for class times. |
+| CLE language-advising appointments, September 9–10 | Not ported: its e-hall AMP browser session and appointment-specific preflight/read-back require a separate integration. No booking or cancellation command is exposed. |
+| MUST-take partial-coverage solver and Electron/WebUI | Not ported: the current CLI solver requires all requested course codes, and desktop/UI workflows remain separate. |
+
+`tis enrolled --all` is a course inventory, not a transcript or proof of course
+completion. It uses live current-term metadata, queries posted-grade history as
+a source, and omits scores, GPA, ranks, and raw responses from the output. If a
+source fails, readable courses remain available with `complete: false` and
+source-specific error codes. Unknown credits are omitted.
+
+### Remaining priorities
+
 1. Finish targeted live QA for remaining authenticated reads and retry PMS from the campus network.
 2. Exercise only read-only previews against real booking, library-booking, PMS,
    selection, and Blackboard targets before considering any supervised write.

@@ -73,6 +73,8 @@ npm exec --package=sustech-cli -- sustech version
 | --- | --- | --- |
 | Daily snapshot | `context`, `profile show`, `academic changes` | Public calendar plus optional TIS and Blackboard reads |
 | Teaching system | courses, schedule, grades, exams, degree progress, planning, iCalendar | SUSTech account |
+| Course history | `tis enrolled --all`, grouped by semester without scores | SUSTech account |
+| Course syllabi | `mirror syllabus url`, `check`, `download` | Public mirror |
 | Blackboard | courses, content, assignments, deadlines, grades, announcements, discussions, files | SUSTech account |
 | Campus calendar | teaching weeks, holidays, makeup days, term dates | Public |
 | Library | live Primo search/detail, rooms and reservations | Public catalog; account for bookings |

@@ -4,7 +4,7 @@ This document demonstrates the new schedule UX improvements in `sustech-cli`.
 
 ## 1. Full ISO-8601 Datetime Timestamps
 
-When querying a specific week (`--week`, `--date`, or current-week default),
+When querying a specific date or week (`--date`, `--week`, or current-week default),
 personal schedule entries with known days and periods can include full ISO-8601
 timestamps combining date and clock time, when the matching calendar is available:
 
@@ -34,7 +34,7 @@ timestamps combining date and clock time, when the matching calendar is availabl
 
 ### Catalog vs Personal Schedule
 
-- **Personal schedule** (week-specific queries): Full `startAt` / `endAt` timestamps
+- **Personal schedule** (date- or week-specific queries): Full `startAt` / `endAt` timestamps
 - **Catalog search** (`tis courses search`): `schedule[]` slots lack concrete
   dates, so only `periodStart` / `periodEnd` are provided
 
@@ -64,13 +64,19 @@ sustech tis schedule
 ### Benefits
 - More intuitive for "where is class on Friday?" questions
 - Automatically resolves teaching week from academic calendar
-- Returns only entries for the requested weekday in that week
+- Returns actual classes on the requested date, including makeup classes moved from another week
+- Skips holidays, extra breaks, and final weeks, and collapses repeated TIS display blocks
 - Validates the date belongs to a teaching week in the selected semester
 
 Date queries require the public calendar. Use `--semester` when querying another
-semester. These timestamps describe the regular timetable; this command does not
-apply holiday or makeup-day adjustments. The `context` and calendar-export flows
-use the calendar's holiday and makeup-day rules.
+semester. They share the holiday and makeup-day rules used by `context` and calendar
+export. A makeup entry retains its source weekday and weeks; `startAt` / `endAt`
+give its actual date, and `makeupFor` identifies the original date. For example,
+`--date 2026-09-20 --semester 2026-2027-1` applies the odd-week Friday timetable
+transferred from September 25. Current-week and `--week` queries still describe
+the regular timetable.
+Date results include `omissionCount` for rows whose weekday, weeks, or periods
+could not be resolved, so an incomplete timetable is distinguishable from no classes.
 
 ## 3. Structured Room Fields
 
@@ -140,18 +146,21 @@ date arithmetic needed.
 
 All changes are backward compatible:
 - Period fields (`periodStart`, `periodEnd`) remain unchanged
-- New fields (`startAt`, `endAt`, `rooms`) are optional and additive
-- `startAt` / `endAt` are only added for week-specific personal schedule queries
+- New fields (`startAt`, `endAt`, `rooms`, `makeupFor`) are optional and additive
+- `startAt` / `endAt` are only added for date- or week-specific personal schedule queries
 - Catalog `schedule[]` slots continue to use period fields only
 - Existing JSON consumers continue to work
 - `--week` option still works alongside new `--date` option
 
 ## Testing
 
-All 474 tests pass, including 6 new tests for:
+The schedule regression tests cover:
 - Schedule entry normalization (periods, rooms)
 - ISO timestamp enrichment with full datetimes
 - Multiple room parsing
 - Single room behavior
 - Missing period data handling
 - Week filtering for timestamp enrichment
+- Cross-week makeup dates, holidays, and incomplete date-query rows
+- Duplicate display blocks with overlapping weeks
+- January context resolution across calendar years

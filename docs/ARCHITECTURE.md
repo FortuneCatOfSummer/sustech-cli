@@ -25,8 +25,8 @@ Asia/Shanghai clock times when day and period data are available.
 | 10     | 20:00  | 20:50  | 50min    |
 | 11     | 21:00  | 21:50  | 50min    |
 
-All periods are 50 minutes. When `tis schedule` queries a specific week
-(via `--week`, `--date`, or current-week resolution), personal schedule entries
+All periods are 50 minutes. When `tis schedule` queries a specific date or week
+(via `--date`, `--week`, or current-week resolution), personal schedule entries
 with known days and periods are enriched with full ISO-8601 timestamps when a
 matching calendar is available: `startAt` / `endAt` fields in
 Asia/Shanghai time (e.g. `2026-09-15T14:00:00+08:00`) that combine the class
@@ -34,10 +34,25 @@ date with period-based clock times. The existing `periodStart` / `periodEnd`
 fields remain for compatibility.
 
 Dates are anchored to the Monday of the first teaching week, even when teaching
-starts later that week. `--date` filters to the selected weekday and requires the
-calendar; current-week and `--week` queries preserve the TIS results without
-timestamps if the calendar cannot be loaded. These fields represent the regular
-timetable and do not apply holiday or makeup-day adjustments.
+starts later that week. `--date` requires the calendar and expands the full term
+through the same occurrence resolver as `context` and ICS export. It filters to
+actual dates after holiday, extra-break, final-week, and makeup-day adjustments,
+including transfers between teaching weeks. Repeated display blocks are merged
+by course, section, teacher, room, weekday, and periods; their weeks are combined.
+Makeup entries include `makeupFor` while timestamps use the actual class date.
+Date-query output includes `omissionCount` for timetable rows whose date or
+period could not be resolved, so incomplete input is not presented as a
+confirmed empty day. Periods are converted only for occurrences on the requested
+date, so an unsupported period elsewhere in the term cannot discard valid classes.
+Cross-year date queries preserve the explicit semester and merge holidays from
+the requested date's calendar year. They require both calendars before reading
+the timetable.
+Current-week and `--week` queries describe the regular timetable and preserve the
+TIS results without timestamps if the calendar cannot be loaded.
+
+`context` selects the calendar whose semester contains the requested date. When
+January belongs to the preceding fall, it uses that fall term while retaining
+holidays from the current year's calendar when available.
 
 Catalog `schedule[]` slots span many weeks and lack a concrete date, so they
 retain period fields only without `startAt` / `endAt`. Agents answering

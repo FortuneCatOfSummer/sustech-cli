@@ -47,7 +47,7 @@ The entrypoint behavior is intentionally narrow:
 
 ## Tool surface
 
-The server exposes `42` typed read-only tools in total (`39` public allowlisted
+The server exposes `44` typed read-only tools in total (`41` public allowlisted
 tools plus `3` metadata tools). It does not expose
 a generic string runner such as `sustech_run`.
 
@@ -66,6 +66,8 @@ Core metadata:
 Public research and catalog data:
 
 - `sustech_papers_search`
+- `sustech_mirror_syllabus_url`
+- `sustech_mirror_syllabus_check`
 - `sustech_nces_browse`
 - `sustech_nces_filter_options`
 - `sustech_nces_global_stats`

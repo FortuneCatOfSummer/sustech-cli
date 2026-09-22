@@ -84,20 +84,27 @@ export function formatScheduleEntries(
   semester: Semester,
   entries: PersonalScheduleEntry[],
   week?: number,
+  date?: string,
+  omissionCount = 0,
 ): string {
-  const title = `Personal schedule · ${semester.value}${week === undefined ? " · full semester" : ` · week ${week}`}`;
-  if (entries.length === 0) return `${title}\n\nNo schedule entries returned by TIS.`;
+  const title = `Personal schedule · ${semester.value}${date ? ` · ${date}` : ""}${week === undefined ? " · full semester" : ` · week ${week}`}`;
+  const omissions = omissionCount ? `\n\n${omissionCount} timetable row(s) omitted because their weekday, weeks, or periods could not be resolved.` : "";
+  if (entries.length === 0) return `${title}\n\n${date
+    ? omissionCount ? "No classes could be dated from the incomplete timetable." : "No classes scheduled on this date in the retrieved timetable."
+    : "No schedule entries returned by TIS."}${omissions}`;
   const lines = entries.map((entry, index) => {
     const label = entry.courseName || entry.description || entry.descriptionEn || entry.rwh || "Unnamed entry";
     const details = [
       entry.key,
       entry.periodStart !== undefined ? `period ${entry.periodStart}-${entry.periodEnd ?? entry.periodStart}` : "",
+      date && entry.startAt && entry.endAt ? `${entry.startAt.slice(0, 10)} ${entry.startAt.slice(11, 16)}–${entry.endAt.slice(11, 16)} (Asia/Shanghai)` : "",
+      entry.makeupFor ? `Makeup for ${entry.makeupFor}` : "",
       entry.teacher,
       entry.room,
     ].filter(Boolean).join(" · ");
     return `${index + 1}. ${entry.courseCode ? `${entry.courseCode} — ` : ""}${label}${details ? `\n   ${details}` : ""}`;
   });
-  return `${title}\n\n${lines.join("\n\n")}\n\n${entries.length} schedule entry/entries.`;
+  return `${title}\n\n${lines.join("\n\n")}\n\n${entries.length} schedule entry/entries.${omissions}`;
 }
 
 export function formatGrades(grades: GradeRecord[], summary: GpaSummary): string {

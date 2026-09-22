@@ -102,6 +102,22 @@ test("ICS export expands schedule entries into dated UTC events", () => {
   assert.match(ics, /LOCATION:智华楼102/);
 });
 
+test("duplicate TIS blocks merge weeks without merging distinct sections or rooms", () => {
+  const first = { ...ENTRIES[0], weeks: [1, 3] };
+  const repeated = { ...first, key: "xq1_jc4", weeks: [3, 7] };
+  const otherSection = { ...first, rwh: "R2", weeks: [1] };
+  const otherRoom = { ...first, room: "Another room", weeks: [1] };
+  const occurrences = scheduleOccurrences([first, repeated, otherSection, otherRoom], { teachingStartDate: FALL_2026.snapshot.teachingStart }, FALL_2026);
+  assert.equal(occurrences.length, 5);
+  assert.deepEqual(first.weeks, [1, 3]);
+  assert.equal(occurrences.filter((entry) => entry.week === 3).length, 1);
+  assert.equal(occurrences.filter((entry) => entry.week === 7).length, 1);
+
+  const snapshot = buildContextSchedule([first, repeated], FALL_2026, new Date("2026-09-21T10:30:00+08:00"));
+  assert.equal(snapshot.todayClasses?.length, 1);
+  assert.equal(snapshot.currentClass?.week, 3);
+});
+
 test("legacy ICS export keeps the historical thirteenth TIS period", () => {
   const lateEntry: PersonalScheduleEntry = {
     ...ENTRIES[0],

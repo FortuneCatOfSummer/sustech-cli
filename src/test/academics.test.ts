@@ -61,8 +61,8 @@ test("academic records are normalized into stable Agent-facing fields", () => {
     ZC: "1",
   });
   assert.equal(fallback.courseName, "写作课");
-  assert.equal(fallback.periodStart, 9);
-  assert.equal(fallback.periodEnd, 9);
+  assert.equal(fallback.periodStart, undefined);
+  assert.equal(fallback.periodEnd, undefined);
   assert.deepEqual(fallback.weeks, []);
 });
 

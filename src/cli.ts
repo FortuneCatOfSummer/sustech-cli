@@ -86,6 +86,8 @@ import {
 } from "./context/live.js";
 import { ContextService } from "./context/service.js";
 import { buildContextSchedule } from "./context/schedule.js";
+import { loadContextCalendar } from "./context/calendar.js";
+import { scheduleEntriesForDate } from "./tis/remaining-calendar.js";
 import type { ContextInput, ContextLevel, DeadlineSummary } from "./context/types.js";
 import {
   DOCTOR_SERVICES,
@@ -142,6 +144,8 @@ import { auditDegreeRequirements, loadDegreeRequirements } from "./tis/degree-au
 import { gradesBySemester, summariseGrades } from "./tis/academics.js";
 import { TisSession } from "./tis/auth.js";
 import { TisClient, type TisSelectionState } from "./tis/client.js";
+import { formatCourseHistory, readCourseHistory } from "./tis/course-history.js";
+import { buildSyllabusLinks, checkSyllabus, downloadSyllabusPdf } from "./services/syllabus.js";
 import {
   buildCourseDecisionNcesLookupRequests,
   recommendCourseSections,
@@ -465,6 +469,9 @@ Usage:
   sustech services status [SERVICE]
   sustech papers search QUERY [--max N] [--min-year YYYY] [--open-access|--resolve-oa]
   sustech papers fetch-oa DOI --destination PATH [--overwrite]
+  sustech mirror syllabus url CODE
+  sustech mirror syllabus check CODE
+  sustech mirror syllabus download CODE --destination PATH [--overwrite]
   sustech nces browse [--page N] [--page-size N] [--sort rating|reviews|name] [--offering-unit NAME]
   sustech nces filter-options
   sustech nces global-stats
@@ -547,7 +554,7 @@ Usage:
   sustech tis courses search [KEYWORD] [--semester YYYY-YYYY-N] [--limit N] [--refresh]
   sustech tis courses available [KEYWORD] --round ROUND [--semester YYYY-YYYY-N] [--limit N]
   sustech tis courses detail CODE [--rwh RWH] [--round ROUND] [--semester YYYY-YYYY-N]
-  sustech tis enrolled [--semester YYYY-YYYY-N]
+  sustech tis enrolled [--semester YYYY-YYYY-N|--all]
   sustech tis schedule [--semester YYYY-YYYY-N] [--week N|--date YYYY-MM-DD|--all]
   sustech tis grades [--semester YYYY-YYYY-N]
   sustech tis exams
@@ -936,6 +943,10 @@ async function main(argv: string[]): Promise<void> {
     await runPapers(parsed.positionals, values, output);
     return;
   }
+  if (group === "mirror") {
+    await runMirror(parsed.positionals, values, output);
+    return;
+  }
   if (group === "nces") {
     await runNces(parsed.positionals, values, output);
     return;
@@ -1023,6 +1034,18 @@ async function main(argv: string[]): Promise<void> {
     return;
   }
   if (command === "enrolled" && operation === undefined) {
+    if (values.all && values.semester !== undefined) throw usageError("Choose either --semester or --all, not both.");
+    if (values.all) {
+      const report = await readCourseHistory(await tisClient(values));
+      writeSuccess({
+        command: "tis enrolled",
+        data: report,
+        text: formatCourseHistory(report),
+        items: report.courses,
+        summary: { total: report.total, semesterCount: report.semesters.length, complete: report.complete, sourceStatuses: report.sourceStatuses },
+      }, output);
+      return;
+    }
     const semester = parseSemester(values.semester);
     const client = await tisClient(values);
     const courses = await client.enrolled(semester);
@@ -1057,7 +1080,8 @@ async function main(argv: string[]): Promise<void> {
     if (values.all) {
       week = undefined;
     } else if (resolvedDate !== undefined) {
-      const calendar = await new CalendarClient().loadYear(calendarYearForSemester(semester), "undergraduate");
+      const calendarClient = new CalendarClient();
+      const calendar = await calendarClient.loadYear(calendarYearForSemester(semester), "undergraduate");
       term = calendarTermForSemester(calendar, semester);
       if (!term) {
         throw new CliError(`Calendar term not found for semester ${semester.value}.`, "CALENDAR_TERM_NOT_FOUND", 2);
@@ -1066,14 +1090,24 @@ async function main(argv: string[]): Promise<void> {
       if (week < 1) {
         throw new CliError(`Date ${resolvedDate} is not within the teaching period of ${semester.value}.`, "DATE_OUT_OF_SEMESTER", 2);
       }
+      const dateYear = Number(resolvedDate.slice(0, 4));
+      if (dateYear !== calendar.year) {
+        const dateCalendar = await calendarClient.loadYear(dateYear, "undergraduate");
+        term = new CalendarTerm(term.snapshot, [...dateCalendar.holidays(), ...calendar.holidays()]);
+      }
     } else if (requestedWeek === undefined) {
       week = await client.currentWeek();
     } else {
       week = requestedWeek;
     }
     if (week !== undefined && week > 36) throw usageError("--week must be between 1 and 36.");
-    let entries = await client.schedule(semester, week);
-    if (week !== undefined) {
+    let entries = await client.schedule(semester, resolvedDate ? undefined : week);
+    let dateOmissionCount = 0;
+    if (resolvedDate && term) {
+      const dated = scheduleEntriesForDate(entries, resolvedDate, term);
+      entries = dated.entries;
+      dateOmissionCount = dated.omissionCount;
+    } else if (week !== undefined) {
       if (!term) {
         // Timestamps are optional; a public-calendar outage must not discard the TIS schedule.
         const calendar = await new CalendarClient()
@@ -1089,26 +1123,22 @@ async function main(argv: string[]): Promise<void> {
         });
       }
     }
-    if (resolvedDate) {
-      const weekday = new Date(`${resolvedDate}T00:00:00Z`).getUTCDay() || 7;
-      entries = entries.filter((entry) => entry.day === weekday);
-    }
     const data = {
       semester,
       ...(week !== undefined ? { week } : {}),
-      ...(resolvedDate ? { date: resolvedDate } : {}),
+      ...(resolvedDate ? { date: resolvedDate, omissionCount: dateOmissionCount } : {}),
       entries,
       total: entries.length,
     };
     writeSuccess({
       command: "tis schedule",
       data,
-      text: formatScheduleEntries(semester, entries, week),
+      text: formatScheduleEntries(semester, entries, week, resolvedDate, dateOmissionCount),
       items: entries,
       summary: {
         semester: semester.value,
         ...(week !== undefined ? { week } : {}),
-        ...(resolvedDate ? { date: resolvedDate } : {}),
+        ...(resolvedDate ? { date: resolvedDate, omissionCount: dateOmissionCount } : {}),
         total: entries.length,
       },
     }, output);
@@ -3297,13 +3327,12 @@ async function runContext(
   if (positionals.length !== 1) throw usageError(`Unknown command: ${positionals.join(" ")}`);
   const date = isoDate(values.date ?? todayInShenzhen(), "--date");
   if (values.live && date !== todayInShenzhen()) throw usageError("--live is only available for today's date in Asia/Shanghai. Omit --live for a calendar date preview.");
-  const year = Number(date.slice(0, 4));
   const level = contextLevel(values.level);
   const requestedCalendarLevel = calendarLevel(values["calendar-level"]);
   let calendar: AcademicCalendar | undefined;
   let calendarError: string | undefined;
   try {
-    calendar = await new CalendarClient().loadYear(year, requestedCalendarLevel);
+    calendar = await loadContextCalendar(date, requestedCalendarLevel);
   } catch (error) {
     calendarError = errorMessage(error);
   }
@@ -4053,6 +4082,35 @@ function runServiceStatus(
     text: formatServiceStatuses(statuses),
     items: statuses,
     summary: { total: statuses.length },
+  }, output);
+}
+
+async function runMirror(
+  positionals: string[],
+  values: Values,
+  output: ReturnType<typeof resolveOutputOptions>,
+): Promise<void> {
+  const [, category, operation, code] = positionals;
+  if (category !== "syllabus" || !["url", "check", "download"].includes(operation ?? "") || positionals.length !== 4 || !code) {
+    throw usageError("Usage: sustech mirror syllabus url|check|download CODE [--destination PATH] [--overwrite]");
+  }
+  const links = buildSyllabusLinks(code);
+  if (operation === "download") {
+    const downloaded = await downloadSyllabusPdf(links.courseCode, required(values.destination, "--destination"), {
+      overwrite: Boolean(values.overwrite),
+    });
+    writeSuccess({
+      command: "mirror syllabus download",
+      data: downloaded,
+      text: `Syllabus ${downloaded.courseCode}\n${downloaded.destination}\n${downloaded.size} bytes · SHA-256 ${downloaded.sha256}`,
+    }, output);
+    return;
+  }
+  const result = operation === "check" ? await checkSyllabus(links.courseCode) : links;
+  writeSuccess({
+    command: `mirror syllabus ${operation}`,
+    data: result,
+    text: `Syllabus ${result.courseCode} · ${result.availability}\nPDF: ${result.pdfUrl}\nHTML link (not checked): ${result.htmlUrl}`,
   }, output);
 }
 
@@ -8031,6 +8089,7 @@ function commandConsequenceOperations(command: string): string[] {
     "lib-booking cancel apply": ["library-booking.cancel"],
     "pms upload apply": ["pms.upload"],
     "pms delete apply": ["pms.delete"],
+    "mirror syllabus download": ["mirror.syllabus.download"],
   };
   if (command === "tis selection apply") return ["tis.cart.update", "tis.drop", "tis.bid"];
   return [...(direct[command] ?? [])];

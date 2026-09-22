@@ -19,6 +19,7 @@ const NCES_SEARCH_TYPES = ["all", "course", "teacher", "review"] as const;
 const NCES_REVIEW_SORTS = ["helpful", "newest", "oldest", "rating-high", "rating-low"] as const;
 const NCES_RANKING_CATEGORIES = ["top-teachers", "top-rated-courses", "popular-courses", "top-reviews", "long-reviews", "top-users"] as const;
 const NCES_COURSE_CODE = z.string().trim().regex(/^[A-Za-z0-9._-]{1,40}$/u, "Unsupported NCES course-code format.");
+const SYLLABUS_COURSE_CODE = z.string().trim().regex(/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u, "Unsupported syllabus course-code format.");
 const NCES_TERM = z.string().regex(/^\d{5}$/u, "Expected a five-digit NCES term ID.");
 const NCES_OFFERING_UNIT = z.string().trim().min(1).max(200);
 const NCES_TEACHER = z.string().trim().min(1).max(200);
@@ -39,6 +40,7 @@ const SERVICE_NAMES = [
   "pms",
   "nces",
   "papers",
+  "syllabus",
   "sustech-online",
 ] as const;
 const CONSEQUENCE_OPERATIONS = CONSEQUENCES.map((entry) => entry.operation) as [string, ...string[]];
@@ -112,6 +114,28 @@ export function registerPublicMcpTools(server: McpServer): void {
       annotations: readOnlyAnnotations(false),
     },
     async ({ service }, ctx) => runTypedCommand("services status", service === undefined ? [] : [service], ctx.mcpReq.signal),
+  );
+
+  server.registerTool(
+    PUBLIC_MCP_TOOL_BY_COMMAND["mirror syllabus url"],
+    {
+      title: "Build public course syllabus links",
+      description: "Build PDF and HTML links on the SUSTech public mirror without checking availability or accessing an account.",
+      inputSchema: z.object({ courseCode: SYLLABUS_COURSE_CODE }),
+      annotations: readOnlyAnnotations(false),
+    },
+    async ({ courseCode }, ctx) => runTypedCommand("mirror syllabus url", [courseCode], ctx.mcpReq.signal),
+  );
+
+  server.registerTool(
+    PUBLIC_MCP_TOOL_BY_COMMAND["mirror syllabus check"],
+    {
+      title: "Check a public course syllabus",
+      description: "Check the public mirror for one course syllabus PDF. Missing files and service failures are reported separately; no download or account access occurs.",
+      inputSchema: z.object({ courseCode: SYLLABUS_COURSE_CODE }),
+      annotations: readOnlyAnnotations(true),
+    },
+    async ({ courseCode }, ctx) => runTypedCommand("mirror syllabus check", [courseCode], ctx.mcpReq.signal),
   );
 
   server.registerTool(

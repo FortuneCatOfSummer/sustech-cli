@@ -3,6 +3,7 @@ import { BOOKING_STATUS } from "./booking.js";
 import { LIBRARY_BOOKING_STATUS, LIBRARY_CATALOG_STATUS } from "./library.js";
 import { NCES_STATUS } from "./nces.js";
 import { PAPERS_STATUS } from "./papers.js";
+import { SYLLABUS_STATUS } from "./syllabus.js";
 import { PMS_STATUS } from "./pms.js";
 import { SUSTECH_ONLINE_STATUS } from "./sustech-online.js";
 import { WS_STATUS } from "./ws.js";
@@ -17,6 +18,7 @@ export const SERVICE_STATUSES: readonly ServiceStatus[] = [
   PMS_STATUS,
   NCES_STATUS,
   PAPERS_STATUS,
+  SYLLABUS_STATUS,
   SUSTECH_ONLINE_STATUS,
 ] as const;
 
@@ -63,6 +65,7 @@ export type {
 export * from "./library.js";
 export * from "./nces.js";
 export * from "./papers.js";
+export * from "./syllabus.js";
 export * from "./pms-auth.js";
 export * from "./pms.js";
 export * from "./sustech-online.js";

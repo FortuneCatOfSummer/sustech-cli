@@ -66,6 +66,7 @@ export interface PersonalScheduleEntry {
   periodEnd?: number;
   startAt?: string;
   endAt?: string;
+  makeupFor?: string;
   weeks: number[];
 }
 

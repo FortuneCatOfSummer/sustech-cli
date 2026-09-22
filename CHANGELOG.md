@@ -6,6 +6,16 @@ All notable changes to `sustech-cli` are documented in this file.
 
 ### Added
 
+- Add public syllabus links, availability checks, and guarded PDF downloads via
+  `mirror syllabus url|check|download`. Read-only URL/check tools are also
+  available through MCP; downloads return a SHA-256 digest and require an
+  explicit local destination.
+- Add `tis enrolled --all` to combine current enrollment with grade-free course
+  history by semester. Preserve source status, missing credits, and ambiguous
+  course identities without exposing scores, GPA, or raw student records.
+- Apply the academic calendar to `tis schedule --date`: omit holiday and exam
+  days, resolve cross-week makeup classes, and report their original date in
+  `makeupFor` alongside the actual class timestamps.
 - Check the official npm release once per day in interactive terminals and ask
   before updating. Add `sustech update [--yes]` for an explicit check or
   confirmed install, while keeping CI, pipes, JSON, and JSONL prompt-free.
@@ -43,6 +53,12 @@ All notable changes to `sustech-cli` are documented in this file.
 
 ### Fixed
 
+- Resolve January context against the previous year's fall calendar while
+  retaining the current year's holidays. Deduplicate repeated timetable blocks
+  in course reminders, date queries, and iCalendar exports.
+- Recover missing course codes from recognized TIS teaching-task identifiers;
+  use explicit period fields or schedule descriptions instead of treating a
+  display-block key as a class period.
 - Accept `tis schedule --date`, validate calendar dates before authentication,
   and return only the requested day's classes. Resolve spring and summer terms
   using the correct calendar year and anchor timestamps to the teaching week's

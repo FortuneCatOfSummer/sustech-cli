@@ -1,6 +1,6 @@
 import type { CalendarTerm } from "../calendar/client.js";
 import { CliError } from "../core/errors.js";
-import { scheduleOccurrences } from "../tis/remaining-calendar.js";
+import { deduplicateScheduleEntries, scheduleOccurrences } from "../tis/remaining-calendar.js";
 import type { PersonalScheduleEntry } from "../tis/types.js";
 import type { ContextClass, ScheduleReminder } from "./types.js";
 
@@ -8,7 +8,7 @@ import type { ContextClass, ScheduleReminder } from "./types.js";
 export function buildContextSchedule(entries: readonly PersonalScheduleEntry[], term: CalendarTerm, now: Date): ScheduleReminder {
   const date = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai" }).format(now);
   let omissionCount = 0;
-  const occurrences = entries.flatMap((entry) => {
+  const occurrences = deduplicateScheduleEntries(entries).flatMap((entry) => {
     if (entry.day === undefined || entry.periodStart === undefined || entry.periodEnd === undefined || entry.weeks.length === 0) {
       omissionCount++;
       return [];

@@ -8,6 +8,7 @@ const MUTATION_CONSEQUENCES: Readonly<Record<string, readonly string[]>> = {
   "academic snapshot save": ["academic.snapshot.save"],
   "academic watch": ["academic.snapshot.save"],
   "papers fetch-oa": ["papers.fetch-oa"],
+  "mirror syllabus download": ["mirror.syllabus.download"],
   "bb download": ["blackboard.download"],
   "bb sync": ["blackboard.sync"],
   "bb calendar-link set": ["blackboard.calendar-link.store"],

@@ -130,6 +130,57 @@ export function scheduleOccurrences(
   return resolveScheduleOccurrences(entries, anchor, calendarTerm).map(({ entry: _entry, ...occurrence }) => occurrence);
 }
 
+/** TIS can repeat one meeting under multiple display-block keys. */
+export function deduplicateScheduleEntries(entries: readonly PersonalScheduleEntry[]): PersonalScheduleEntry[] {
+  const result: PersonalScheduleEntry[] = [];
+  const meetings = new Map<string, PersonalScheduleEntry>();
+  for (const entry of entries) {
+    if (entry.day === undefined || entry.periodStart === undefined || entry.periodEnd === undefined || !entry.weeks.length) {
+      result.push(entry);
+      continue;
+    }
+    const identity = JSON.stringify([
+      entry.rwh, entry.courseCode, entry.courseName, entry.teacher, entry.room,
+      entry.day, entry.periodStart, entry.periodEnd,
+    ]);
+    const existing = meetings.get(identity);
+    if (existing) {
+      existing.weeks = [...new Set([...existing.weeks, ...entry.weeks])].sort((left, right) => left - right);
+    } else {
+      const meeting = { ...entry, weeks: [...new Set(entry.weeks)].sort((left, right) => left - right) };
+      meetings.set(identity, meeting);
+      result.push(meeting);
+    }
+  }
+  return result;
+}
+
+export function scheduleEntriesForDate(
+  entries: readonly PersonalScheduleEntry[],
+  date: string,
+  calendarTerm: CalendarTerm,
+): { entries: PersonalScheduleEntry[]; omissionCount: number } {
+  let omissionCount = entries.filter((entry) => entry.day === undefined || entry.periodStart === undefined || entry.periodEnd === undefined || !entry.weeks.length).length;
+  const occurrences = resolveScheduleOccurrences(entries, { teachingStartDate: calendarTerm.snapshot.teachingStart }, calendarTerm, {
+    date,
+    onUnsupportedPeriod: () => { omissionCount++; },
+  });
+  return {
+    entries: occurrences.map((occurrence) => ({
+      ...occurrence.entry,
+      startAt: utcStampToShanghai(occurrence.startUtc),
+      endAt: utcStampToShanghai(occurrence.endUtc),
+      ...(occurrence.sourceDate ? { makeupFor: occurrence.sourceDate } : {}),
+    })),
+    omissionCount,
+  };
+}
+
+function utcStampToShanghai(stamp: string): string {
+  const iso = stamp.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/, "$1-$2-$3T$4:$5:$6Z");
+  return `${new Date(Date.parse(iso) + CHINA_OFFSET_MINUTES * 60_000).toISOString().slice(0, 19)}+08:00`;
+}
+
 interface ResolvedScheduleOccurrence extends IcsOccurrence {
   entry: PersonalScheduleEntry;
 }
@@ -138,36 +189,48 @@ function resolveScheduleOccurrences(
   entries: readonly PersonalScheduleEntry[],
   anchor: IcsAnchor,
   calendarTerm?: CalendarTerm,
+  target?: { date: string; onUnsupportedPeriod: () => void },
 ): ResolvedScheduleOccurrence[] {
   const weekOneMonday = parseIsoDate(weekOneMondayFromAnchor(anchor));
   const occurrences: ResolvedScheduleOccurrence[] = [];
+  const meetings = deduplicateScheduleEntries(entries);
+  const append = (entry: PersonalScheduleEntry, date: string, week: number, makeup?: { sourceDate: string; sourceWeekday: WeekdayName }) => {
+    try {
+      occurrences.push(resolveOccurrence(entry, date, week, makeup));
+    } catch (error) {
+      if (!target || !(error instanceof CliError) || error.code !== "UNSUPPORTED_PERIOD") throw error;
+      target.onUnsupportedPeriod();
+    }
+  };
 
-  for (const entry of entries) {
+  for (const entry of meetings) {
     if (entry.day === undefined || entry.periodStart === undefined || entry.periodEnd === undefined) continue;
     for (const week of [...entry.weeks].sort((left, right) => left - right)) {
       const date = addUtcDays(weekOneMonday, (week - 1) * 7 + (entry.day - 1));
       const dateText = toIsoDate(date);
+      if (target && dateText !== target.date) continue;
       if (calendarTerm && !regularClassRunsOn(calendarTerm, dateText)) continue;
-      occurrences.push(resolveOccurrence(entry, dateText, week));
+      append(entry, dateText, week);
     }
   }
 
   if (calendarTerm) {
     for (const compensatory of calendarTerm.snapshot.compensatories) {
-      const target = compensatoryTarget(calendarTerm, compensatory);
-      if (!target) continue;
+      if (target && compensatory.date !== target.date) continue;
+      const source = compensatoryTarget(calendarTerm, compensatory);
+      if (!source) continue;
       const sourceDay = weekdayNumber(compensatory.workday);
-      for (const entry of entries) {
+      for (const entry of meetings) {
         if (
           entry.day !== sourceDay
           || entry.periodStart === undefined
           || entry.periodEnd === undefined
-          || !entry.weeks.includes(target.week)
+          || !entry.weeks.includes(source.week)
         ) continue;
-        occurrences.push(resolveOccurrence(entry, compensatory.date, target.week, {
-          sourceDate: target.date,
+        append(entry, compensatory.date, source.week, {
+          sourceDate: source.date,
           sourceWeekday: compensatory.workday,
-        }));
+        });
       }
     }
   }
@@ -215,6 +278,7 @@ function regularClassRunsOn(term: CalendarTerm, date: string): boolean {
   return date >= term.snapshot.teachingStart
     && date <= term.snapshot.teachingEnd
     && !day.flags.isHoliday
+    && !day.flags.isCompensatory
     && !day.flags.isExtraBreak
     && !day.flags.isFinal;
 }

@@ -151,6 +151,10 @@ export class AcademicCalendar {
     return [this.spring, ...(this.summer ? [this.summer] : []), this.fall];
   }
 
+  public holidays(): Holiday[] {
+    return this.holidaysByDate.map((holiday) => ({ ...holiday }));
+  }
+
   public day(input: Date | string = new Date()): CalendarDayInfo {
     const date = dateOnly(input);
     for (const term of this.terms()) {

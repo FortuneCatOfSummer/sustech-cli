@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { currentSemester, parseSemester, semesterFromCurrentTerm } from "../core/semester.js";
 import { buildWritePayload } from "../tis/client.js";
-import { normaliseCourse, parseScheduleLine } from "../tis/normalise.js";
+import { normaliseCourse, normalisePersonalScheduleEntry, parseScheduleLine } from "../tis/normalise.js";
 
 test("currentSemester follows the SUSTech fall, spring, summer term convention", () => {
   assert.deepEqual(currentSemester(new Date("2026-10-01")), {
@@ -64,6 +64,35 @@ test("normaliseCourse emits Agent-ready schedule data without leaking kcxx HTML"
 test("schedule parser respects odd/even week constraints", () => {
   assert.deepEqual(parseScheduleLine("1-8单周,星期三第7-8节 慧园2栋509")?.weeks, [1, 3, 5, 7]);
   assert.deepEqual(parseScheduleLine("1-8双周,星期三第7-8节 慧园2栋509")?.weeks, [2, 4, 6, 8]);
+});
+
+test("personal schedule uses task course codes only when explicit fields are absent", () => {
+  const row = { RWH: "2026-2027-1-CS323-001" };
+  assert.equal(normalisePersonalScheduleEntry(row).courseCode, "CS323");
+  assert.equal(normalisePersonalScheduleEntry({ ...row, KCDM: "CS999" }).courseCode, "CS999");
+  assert.equal(normalisePersonalScheduleEntry({ rwh: "2026-2027-2-BIO102B-LAB-002" }).courseCode, "BIO102B-LAB");
+  for (const rwh of ["arbitrary-CS323-001", "2026-2027-9-CS323-001", "2026-2027-1-CS323-notasection"]) {
+    assert.equal(normalisePersonalScheduleEntry({ RWH: rwh }).courseCode, "");
+  }
+});
+
+test("personal schedule block indexes never replace actual period numbers", () => {
+  const row = {
+    KEY: "xq5_jc2", ZC: null,
+    SKSJ: "Synthetic course\n[Synthetic teacher]\n[1-15单周]\n[101]\n[5-6节]",
+  };
+  const described = normalisePersonalScheduleEntry(row);
+  assert.equal(described.day, 5);
+  assert.equal(described.periodStart, 5);
+  assert.equal(described.periodEnd, 6);
+  assert.deepEqual(described.weeks, [1, 3, 5, 7, 9, 11, 13, 15]);
+  const explicit = normalisePersonalScheduleEntry({ ...row, KSJC: 7, JSJC: 8 });
+  assert.equal(explicit.periodStart, 7);
+  assert.equal(explicit.periodEnd, 8);
+  const unknown = normalisePersonalScheduleEntry({ KEY: "xq5_jc2" });
+  assert.equal(unknown.periodStart, undefined);
+  assert.equal(unknown.periodEnd, undefined);
+  assert.deepEqual(unknown.weeks, []);
 });
 
 test("enrollment payload retains the HAR-derived TIS write fields", () => {

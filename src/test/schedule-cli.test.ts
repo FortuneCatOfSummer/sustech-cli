@@ -28,10 +28,10 @@ test("schedule date option is discoverable and invalid selectors fail before cre
   }
 });
 
-test("schedule date returns only the requested weekday and loads the calendar once", () => {
+test("schedule date returns only the requested day's deduplicated classes and loads the calendar once", () => {
   const result = runFixture([
     "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-15", "--json",
-  ]);
+  ], { schedule: "duplicates" });
   assert.equal(result.status, 0, JSON.stringify(result.envelope));
   const data = result.envelope.data;
   assert.equal(data.date, "2026-09-15");
@@ -39,7 +39,94 @@ test("schedule date returns only the requested weekday and loads the calendar on
   assert.equal(data.total, 1);
   assert.equal(data.entries[0].day, 2);
   assert.equal(data.entries[0].startAt, "2026-09-15T14:00:00+08:00");
-  assert.deepEqual(result.calls, ["calendar:2026", "schedule:2026-2027-1:2"]);
+  assert.deepEqual(result.calls, ["calendar:2026", "schedule:2026-2027-1:undefined"]);
+});
+
+test("schedule date applies a different week's Friday timetable on a Sunday makeup day", () => {
+  const result = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-20", "--json",
+  ], { schedule: "makeup" });
+  assert.equal(result.status, 0, JSON.stringify(result.envelope));
+  const data = result.envelope.data;
+  assert.equal(data.week, 2);
+  assert.equal(data.total, 1);
+  assert.equal(data.entries[0].day, 5);
+  assert.equal(data.entries[0].startAt, "2026-09-20T14:00:00+08:00");
+  assert.equal(data.entries[0].endAt, "2026-09-20T15:50:00+08:00");
+  assert.equal(data.entries[0].makeupFor, "2026-09-25");
+  assert.deepEqual(result.calls, ["calendar:2026", "schedule:2026-2027-1:undefined"]);
+});
+
+test("schedule date does not report the holiday's regular Friday classes", () => {
+  const result = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-25", "--json",
+  ], { schedule: "makeup" });
+  assert.equal(result.status, 0, JSON.stringify(result.envelope));
+  assert.equal(result.envelope.data.total, 0);
+  assert.deepEqual(result.envelope.data.entries, []);
+  assert.deepEqual(result.calls, ["calendar:2026", "schedule:2026-2027-1:undefined"]);
+});
+
+test("schedule date distinguishes incomplete timetable rows from a verified empty date", () => {
+  const result = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-15", "--json",
+  ], { schedule: "incomplete" });
+  assert.equal(result.status, 0, JSON.stringify(result.envelope));
+  assert.equal(result.envelope.data.total, 0);
+  assert.equal(result.envelope.data.omissionCount, 1);
+});
+
+test("cross-year date queries keep the explicit fall semester and apply the target year's holidays", () => {
+  const holiday = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2027-01-01", "--json",
+  ], { schedule: "new-year" });
+  assert.equal(holiday.status, 0, JSON.stringify(holiday.envelope));
+  assert.equal(holiday.envelope.data.semester.value, "2026-2027-1");
+  assert.equal(holiday.envelope.data.week, 17);
+  assert.equal(holiday.envelope.data.total, 0);
+  assert.equal(holiday.envelope.data.omissionCount, 0);
+  assert.deepEqual(holiday.calls, ["calendar:2026", "calendar:2027", "schedule:2026-2027-1:undefined"]);
+
+  const ordinaryFriday = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-12-25", "--json",
+  ], { schedule: "new-year" });
+  assert.equal(ordinaryFriday.status, 0, JSON.stringify(ordinaryFriday.envelope));
+  assert.equal(ordinaryFriday.envelope.data.total, 1);
+  assert.equal(ordinaryFriday.envelope.data.entries[0].startAt, "2026-12-25T14:00:00+08:00");
+});
+
+test("cross-year date queries require target-year holidays and never silently change an explicit semester", () => {
+  const unavailable = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2027-01-01", "--json",
+  ], { calendar: "date-outage", schedule: "new-year" });
+  assert.notEqual(unavailable.status, 0);
+  assert.equal(unavailable.envelope.ok, false);
+  assert.deepEqual(unavailable.calls, ["calendar:2026", "calendar:2027"]);
+
+  const wrongSemester = runFixture([
+    "tis", "schedule", "--semester", "2025-2026-1", "--date", "2027-01-01", "--json",
+  ], { schedule: "new-year" });
+  assert.notEqual(wrongSemester.status, 0);
+  assert.equal(wrongSemester.envelope.error.code, "DATE_OUT_OF_SEMESTER");
+  assert.deepEqual(wrongSemester.calls, ["calendar:2025"]);
+});
+
+test("date queries ignore unsupported periods on other dates and report them only on the requested date", () => {
+  const valid = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-14", "--json",
+  ], { schedule: "unsupported" });
+  assert.equal(valid.status, 0, JSON.stringify(valid.envelope));
+  assert.equal(valid.envelope.data.total, 1);
+  assert.equal(valid.envelope.data.omissionCount, 0);
+  assert.equal(valid.envelope.data.entries[0].startAt, "2026-09-14T08:00:00+08:00");
+
+  const partial = runFixture([
+    "tis", "schedule", "--semester", "2026-2027-1", "--date", "2026-09-22", "--json",
+  ], { schedule: "unsupported" });
+  assert.equal(partial.status, 0, JSON.stringify(partial.envelope));
+  assert.equal(partial.envelope.data.total, 1);
+  assert.equal(partial.envelope.data.omissionCount, 1);
+  assert.equal(partial.envelope.data.entries[0].startAt, "2026-09-22T14:00:00+08:00");
 });
 
 test("spring and summer schedule dates load their calendar year and preserve historical period times", () => {
@@ -48,7 +135,7 @@ test("spring and summer schedule dates load their calendar year and preserve his
     assert.equal(result.status, 0, JSON.stringify(result.envelope));
     assert.equal(result.envelope.data.week, 2);
     assert.equal(result.envelope.data.entries[0].startAt, `${date}T13:30:00+08:00`);
-    assert.deepEqual(result.calls, ["calendar:2026", `schedule:${semester}:2`]);
+    assert.deepEqual(result.calls, ["calendar:2026", `schedule:${semester}:undefined`]);
   }
 });
 
@@ -76,7 +163,7 @@ test("date queries still require a matching calendar and fail before requesting 
   }
 });
 
-function runFixture(args: string[], options: { credentials?: boolean; calendar?: "outage" | "missing" } = {}) {
+function runFixture(args: string[], options: { credentials?: boolean; calendar?: "outage" | "missing" | "date-outage"; schedule?: "makeup" | "duplicates" | "incomplete" | "new-year" | "unsupported" } = {}) {
   const root = mkdtempSync(join(tmpdir(), "sustech-schedule-cli-"));
   const callsPath = join(root, "calls.json");
   const fixturePath = join(root, "fixture.mjs");
@@ -95,11 +182,25 @@ globalThis.fetch = async () => { throw new Error("Unexpected network request in 
 TisClient.prototype.currentWeek = async () => { record("currentWeek"); return 2; };
 TisClient.prototype.schedule = async (semester, week) => {
   record("schedule:" + semester.value + ":" + week);
-  return [1, 2].map(day => ({
+  const entries = [1, 2].map(day => ({
     rwh: "course-" + day, key: "xq" + day + "_jc5", courseCode: "CS10" + day,
     courseName: "Fixture course", teacher: "Fixture teacher", room: "Fixture room",
     description: "", descriptionEn: "", day, periodStart: 5, periodEnd: 6, weeks: [1, 2, 3],
   }));
+  if (${JSON.stringify(options.schedule)} === "duplicates") return [...entries, { ...entries[1], key: "xq2_jc6" }];
+  if (${JSON.stringify(options.schedule)} === "incomplete") return [{ ...entries[1], weeks: [] }];
+  if (${JSON.stringify(options.schedule)} === "new-year") return [{ ...entries[0], day: 5, weeks: [16, 17], key: "xq5_jc1" }];
+  if (${JSON.stringify(options.schedule)} === "unsupported") return [
+    { ...entries[0], periodStart: 1, periodEnd: 2 },
+    { ...entries[1], weeks: [3] },
+    { ...entries[1], rwh: "unsupported", key: "xq2_jc13", weeks: [3], periodStart: 13, periodEnd: 13 },
+  ];
+  if (${JSON.stringify(options.schedule)} === "makeup") return [
+    { ...entries[0], day: 5, weeks: [3], key: "xq5_jc1" },
+    { ...entries[0], day: 5, weeks: [3], key: "xq5_jc2" },
+    { ...entries[1], day: 7, weeks: [2], key: "xq7_jc1" },
+  ];
+  return entries;
 };
 function term(start, end) {
   return {
@@ -112,14 +213,19 @@ function term(start, end) {
 CalendarClient.prototype.loadYear = async (year) => {
   record("calendar:" + year);
   if (${JSON.stringify(options.calendar)} === "outage") throw new Error("Synthetic calendar outage");
+  if (${JSON.stringify(options.calendar)} === "date-outage" && year === 2027) throw new Error("Synthetic target-year calendar outage");
   if (${JSON.stringify(options.calendar)} === "missing") return { terms: () => [] };
   const payload = {
     spring_semester: term(year + "-02-25", year + "-06-26"),
     summer_semester: term(year + "-06-29", year + "-08-07"),
     fall_semester: term(year + "-09-07", (year + 1) + "-01-08"),
   };
+  payload.fall_semester.compensatories = [{ date: "2026-09-20", week_type: "odd", workday_type: "Friday" }];
   return AcademicCalendar.fromPayloads(year, "undergraduate", {
-    undergraduate: payload, graduate: payload, general: { holidays: [] },
+    undergraduate: payload, graduate: payload, general: { holidays: [
+      { name: "New Year's Day", start: year + "-01-01", end: year + "-01-01" },
+      { name: "Mid-Autumn Festival", start: "2026-09-25", end: "2026-09-27" },
+    ] },
   });
 };
 `);

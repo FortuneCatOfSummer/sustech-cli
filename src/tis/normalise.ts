@@ -119,18 +119,21 @@ export function normalisePersonalScheduleEntry(raw: Record<string, unknown>): Pe
   let descriptionWeeks = descriptionMeeting ? expandWeeks(descriptionMeeting[1].replace(/[，、]/g, ",")) : [];
   if (descriptionMeeting?.[2] === "单") descriptionWeeks = descriptionWeeks.filter((week) => week % 2 === 1);
   if (descriptionMeeting?.[2] === "双") descriptionWeeks = descriptionWeeks.filter((week) => week % 2 === 0);
+  // KEY's jc suffix identifies a timetable block, not an actual class period.
   const periodStart = numberValue(raw.KSJC ?? raw.ksjc)
-    ?? (keyMatch ? Number(keyMatch[2]) : descriptionMeeting ? Number(descriptionMeeting[4]) : undefined);
+    ?? (descriptionMeeting ? Number(descriptionMeeting[4]) : undefined);
   const periodEnd = numberValue(raw.JSJC ?? raw.jsjc)
-    ?? (descriptionMeeting ? Number(descriptionMeeting[5] ?? descriptionMeeting[4]) : periodStart);
+    ?? (descriptionMeeting ? Number(descriptionMeeting[5] ?? descriptionMeeting[4]) : undefined);
   
   const room = firstString(raw, ["SKDD", "JXDD", "JXCDMC", "room"]) || descriptionMeeting?.[3]?.trim() || "";
   const rooms = room ? parseRoomList(room) : undefined;
+  const rwh = firstString(raw, ["RWH", "rwh"]);
+  const taskCode = /^\d{4}-\d{4}-[123]-([A-Za-z][A-Za-z0-9_-]*)-\d+$/.exec(rwh)?.[1] ?? "";
   
   return {
-    rwh: firstString(raw, ["RWH", "rwh"]),
+    rwh,
     key,
-    courseCode: firstString(raw, ["KCDM", "kcdm", "code"]),
+    courseCode: firstString(raw, ["KCDM", "kcdm", "code"]) || taskCode,
     courseName: firstString(raw, ["KCMC", "kcmc", "KCWZSM", "kcwzsm", "name"])
       || description.split("\n")[0]?.trim()
       || "",

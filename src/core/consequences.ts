@@ -38,6 +38,7 @@ export const CONSEQUENCES: readonly Consequence[] = [
   consequence("pms.upload", "low", false, "Uploads one local document to the campus print queue without printing it.", "A wrong file or option set can add an unintended document to the remote queue.", "Read print jobs back and match the exact filename plus options.", "implemented"),
   consequence("pms.delete", "high", true, "Deletes one exact queued PMS print document.", "The remote queued copy may be unrecoverable if no local source remains.", "Read the print queue back and confirm the exact job ID is absent.", "implemented"),
   consequence("papers.fetch-oa", "low", true, "Writes one public open-access PDF to an explicit local destination.", "With --overwrite, an existing regular file at that exact destination is replaced.", "Use the returned absolute path, byte count, PDF signature validation, and SHA-256 digest.", "implemented"),
+  consequence("mirror.syllabus.download", "low", true, "Writes one public course syllabus PDF to an explicit local destination.", "With --overwrite, an existing regular file at that exact destination is replaced; mirrored syllabi may describe an older course version.", "Verify the course code, mirror URL, absolute path, byte count, PDF signature, and SHA-256 digest.", "implemented"),
 ] as const;
 
 export function consequenceByOperation(operation: string): Consequence | undefined {
