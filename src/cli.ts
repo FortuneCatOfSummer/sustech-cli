@@ -793,7 +793,8 @@ async function main(argv: string[]): Promise<void> {
     }
     let updated = false;
     let method: "source" | "npm" | undefined;
-    const shouldInstall = status.updateAvailable && (values.yes || (output.mode === "text" && await promptYesNo(`Update sustech-cli ${VERSION} → ${status.latestVersion}?`)));
+    const canPrompt = output.mode === "text" && process.stdin.isTTY && process.stderr.isTTY;
+    const shouldInstall = status.updateAvailable && (values.yes || (canPrompt && await promptYesNo(`Update sustech-cli ${VERSION} → ${status.latestVersion}?`)));
     if (shouldInstall) {
       method = await installLatest(PACKAGE_ROOT, output.mode === "text");
       updated = true;
@@ -1046,37 +1047,40 @@ async function main(argv: string[]): Promise<void> {
     if (values.all && values.week !== undefined) throw usageError("Choose either --week or --all, not both.");
     if (values.all && values.date !== undefined) throw usageError("Choose either --date or --all, not both.");
     if (values.date !== undefined && values.week !== undefined) throw usageError("Choose either --date or --week, not both.");
+    const resolvedDate = values.date === undefined ? undefined : isoDate(values.date, "--date");
+    const requestedWeek = values.week === undefined ? undefined : parsePositiveInteger(values.week, 1, "--week");
+    if (requestedWeek !== undefined && requestedWeek > 36) throw usageError("--week must be between 1 and 36.");
     const semester = parseSemester(values.semester);
     const client = await tisClient(values);
     let week: number | undefined;
-    let resolvedDate: string | undefined;
+    let term: CalendarTerm | undefined;
     if (values.all) {
       week = undefined;
-    } else if (values.date !== undefined) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(values.date)) {
-        throw usageError("--date must be in YYYY-MM-DD format.");
-      }
-      resolvedDate = values.date;
-      const calendar = await new CalendarClient().loadYear(Number(semester.xn.split("-")[0]), "undergraduate");
-      const term = calendar.terms().find((t: CalendarTerm) => t.snapshot.semester.value === semester.value);
+    } else if (resolvedDate !== undefined) {
+      const calendar = await new CalendarClient().loadYear(calendarYearForSemester(semester), "undergraduate");
+      term = calendarTermForSemester(calendar, semester);
       if (!term) {
         throw new CliError(`Calendar term not found for semester ${semester.value}.`, "CALENDAR_TERM_NOT_FOUND", 2);
       }
       week = term.weekOf(resolvedDate);
-      if (week === 0) {
+      if (week < 1) {
         throw new CliError(`Date ${resolvedDate} is not within the teaching period of ${semester.value}.`, "DATE_OUT_OF_SEMESTER", 2);
       }
-    } else if (values.week === undefined) {
+    } else if (requestedWeek === undefined) {
       week = await client.currentWeek();
     } else {
-      week = parsePositiveInteger(values.week, 1, "--week");
+      week = requestedWeek;
     }
     if (week !== undefined && week > 36) throw usageError("--week must be between 1 and 36.");
     let entries = await client.schedule(semester, week);
-    
     if (week !== undefined) {
-      const calendar = await new CalendarClient().loadYear(Number(semester.xn.split("-")[0]), "undergraduate");
-      const term = calendar.terms().find((t: CalendarTerm) => t.snapshot.semester.value === semester.value);
+      if (!term) {
+        // Timestamps are optional; a public-calendar outage must not discard the TIS schedule.
+        const calendar = await new CalendarClient()
+          .loadYear(calendarYearForSemester(semester), "undergraduate")
+          .catch(() => undefined);
+        term = calendar ? calendarTermForSemester(calendar, semester) : undefined;
+      }
       if (term) {
         const { enrichScheduleEntriesWithDatetimes } = await import("./tis/client.js");
         entries = enrichScheduleEntriesWithDatetimes(entries, {
@@ -1085,7 +1089,10 @@ async function main(argv: string[]): Promise<void> {
         });
       }
     }
-    
+    if (resolvedDate) {
+      const weekday = new Date(`${resolvedDate}T00:00:00Z`).getUTCDay() || 7;
+      entries = entries.filter((entry) => entry.day === weekday);
+    }
     const data = {
       semester,
       ...(week !== undefined ? { week } : {}),

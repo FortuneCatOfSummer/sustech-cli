@@ -54,6 +54,21 @@ test("schedule enrichment adds full ISO datetime timestamps", () => {
   assert.equal(enriched[0]?.endAt, "2026-09-07T09:50:00+08:00");
 });
 
+test("schedule timestamps anchor midweek teaching starts to Monday and use the date's period table", () => {
+  const entry: import("../tis/types.js").PersonalScheduleEntry = {
+    rwh: "fixture", key: "xq3_jc5", courseCode: "CS101", courseName: "Programming",
+    teacher: "Fixture teacher", room: "101", description: "", descriptionEn: "",
+    day: 3, periodStart: 5, periodEnd: 6, weeks: [1, 2],
+  };
+  const [current] = enrichScheduleEntriesWithDatetimes([entry], { teachingStartDate: "2026-09-09", week: 2 });
+  assert.equal(current?.startAt, "2026-09-16T14:00:00+08:00");
+  assert.equal(current?.endAt, "2026-09-16T15:50:00+08:00");
+
+  const [historical] = enrichScheduleEntriesWithDatetimes([entry], { teachingStartDate: "2026-02-25", week: 2 });
+  assert.equal(historical?.startAt, "2026-03-04T13:30:00+08:00");
+  assert.equal(historical?.endAt, "2026-03-04T15:20:00+08:00");
+});
+
 test("multiple rooms are parsed into rooms array", () => {
   const raw = {
     RWH: "2026-2027-1-PHY201-001",

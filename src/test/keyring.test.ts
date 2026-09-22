@@ -341,6 +341,39 @@ test("linux-encrypted-file backend stores and retrieves credentials", async () =
   }
 });
 
+test("encrypted credentials and calendar links use the configured environment master password", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "sustech-cli-encrypted-env-"));
+  const options = {
+    configDir,
+    platform: "linux" as const,
+    env: { PATH: "/nonexistent", SUSTECH_MASTER_PASSWORD: "environment-master-password" },
+  };
+  const url = "https://bb.sustech.edu.cn/webapps/calendar/calendarFeed/test-token/learn.ics";
+  try {
+    await saveStoredCredentials({ sid: "12410000", password: "synthetic-password" }, options);
+    assert.equal((await loadStoredCredentials(undefined, options)).password, "synthetic-password");
+    await assert.rejects(
+      loadStoredCredentials(undefined, { ...options, env: { PATH: "/nonexistent" } }),
+      (error: unknown) => error instanceof CliError && error.code === "MASTER_PASSWORD_REQUIRED",
+    );
+    await assert.rejects(
+      loadStoredCredentials(undefined, { ...options, env: { ...options.env, SUSTECH_MASTER_PASSWORD: "wrong-password" } }),
+      (error: unknown) => error instanceof CliError && error.code === "MASTER_PASSWORD_INVALID",
+    );
+    assert.equal((await deleteStoredCredentials(undefined, options)).removed, true);
+
+    await saveStoredBlackboardCalendarLink({ url }, options);
+    assert.equal((await loadStoredBlackboardCalendarLink(undefined, options)).url, url);
+    assert.equal((await deleteStoredBlackboardCalendarLink(undefined, options)).removed, true);
+    await assert.rejects(
+      loadStoredBlackboardCalendarLink(undefined, options),
+      (error: unknown) => error instanceof CliError && error.code === "BLACKBOARD_CALENDAR_LINK_NOT_FOUND",
+    );
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+});
+
 test("Linux Secret Service wiring performs store, lookup, and clear through secret-tool", {
   skip: process.platform === "win32",
 }, async () => {

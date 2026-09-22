@@ -27,7 +27,7 @@ import {
   type EvaluationCourseStatus,
   type EvaluationStatusFilter,
 } from "./remaining-evaluation.js";
-import { PERIOD_START_TIMES, PERIOD_DURATION_MINUTES } from "./remaining-calendar.js";
+import { PERIOD_DURATION_MINUTES, periodStartTimesForDate, weekOneMondayFromAnchor } from "./remaining-calendar.js";
 import type { SelectionPreview } from "./remaining-selection.js";
 import { bundleSelectionCourses, type SelectionCourseBundle } from "./selection-bundles.js";
 import type {
@@ -678,17 +678,11 @@ function enrichScheduleEntryWithDatetime(
     return entry;
   }
   
-  const startSlot = PERIOD_START_TIMES[entry.periodStart];
-  const endSlot = PERIOD_START_TIMES[entry.periodEnd];
-  if (!startSlot || !endSlot) {
-    return entry;
-  }
-
   if (options.week === undefined || !entry.weeks.includes(options.week)) {
     return entry;
   }
 
-  const teachingStart = new Date(options.teachingStartDate);
+  const teachingStart = new Date(weekOneMondayFromAnchor(options));
   const mondayOfWeek = new Date(teachingStart);
   mondayOfWeek.setUTCDate(teachingStart.getUTCDate() + (options.week - 1) * 7);
   
@@ -696,6 +690,12 @@ function enrichScheduleEntryWithDatetime(
   classDate.setUTCDate(mondayOfWeek.getUTCDate() + (entry.day - 1));
   
   const dateStr = classDate.toISOString().slice(0, 10);
+  const periodTimes = periodStartTimesForDate(dateStr);
+  const startSlot = periodTimes[entry.periodStart];
+  const endSlot = periodTimes[entry.periodEnd];
+  if (!startSlot || !endSlot) {
+    return entry;
+  }
   
   const startHour = String(startSlot[0]).padStart(2, "0");
   const startMinute = String(startSlot[1]).padStart(2, "0");

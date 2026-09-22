@@ -88,3 +88,38 @@ test("credential resolution preserves explicit automation overrides before keyri
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("encrypted credential resolution preserves explicit master passwords and store environments", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sustech-cli-credentials-master-"));
+  const masterPassword = "synthetic-master-password";
+  const store = { configDir: directory, platform: "linux" as const };
+  try {
+    await saveStoredCredentials({ sid: "12410000", password: "synthetic-password" }, {
+      ...store,
+      env: { PATH: "/nonexistent" },
+      encryptedStoreMasterPassword: masterPassword,
+    });
+
+    for (const env of [{ PATH: "/nonexistent" }, { PATH: "/nonexistent", SUSTECH_MASTER_PASSWORD: "wrong-password" }]) {
+      const credentials = await resolveCredentials({
+        env,
+        store: { ...store, encryptedStoreMasterPassword: masterPassword },
+      });
+      assert.equal(credentials.password, "synthetic-password");
+    }
+
+    const environment = await resolveCredentials({
+      env: { PATH: "/nonexistent", SUSTECH_MASTER_PASSWORD: masterPassword },
+      store,
+    });
+    assert.equal(environment.password, "synthetic-password");
+
+    const storeEnvironment = await resolveCredentials({
+      env: { SUSTECH_MASTER_PASSWORD: "wrong-password" },
+      store: { ...store, env: { PATH: "/nonexistent", SUSTECH_MASTER_PASSWORD: masterPassword } },
+    });
+    assert.equal(storeEnvironment.password, "synthetic-password");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -632,8 +632,10 @@ async function resolveLinuxEncryptedFile(
   const storePath = join(configDir, "encrypted-credentials", `${namespace.service}.json`);
 
   const getMasterPassword = async (): Promise<string> => {
-    if (options.encryptedStoreMasterPassword) {
-      return options.encryptedStoreMasterPassword;
+    const masterPassword = options.encryptedStoreMasterPassword
+      ?? (options.env ?? process.env).SUSTECH_MASTER_PASSWORD;
+    if (masterPassword) {
+      return masterPassword;
     }
     if (options.promptForMasterPassword) {
       return await options.promptForMasterPassword();

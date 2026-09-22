@@ -698,7 +698,7 @@ function periodStartMinutes(period: number, date: string): number {
   return slot ? slot[0] * 60 + slot[1] : Number.POSITIVE_INFINITY;
 }
 
-function periodStartTimesForDate(date: string): Readonly<Record<number, [number, number]>> {
+export function periodStartTimesForDate(date: string): Readonly<Record<number, [number, number]>> {
   return date >= CURRENT_PERIOD_SCHEDULE_START ? PERIOD_START_TIMES : LEGACY_PERIOD_START_TIMES;
 }
 

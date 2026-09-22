@@ -17,7 +17,6 @@ All notable changes to `sustech-cli` are documented in this file.
   on first use and never stores credentials in plaintext.
 - `tis schedule` now supports `--date YYYY-MM-DD` to query a specific date's
   schedule, resolving the teaching week from the academic calendar automatically.
-  The `today` behavior uses `--date` with the current Shanghai date internally.
 - Personal schedule entries from week-specific queries (`tis schedule --week N`,
   `--date YYYY-MM-DD`, or current-week default) now include full ISO-8601
   timestamps: `startAt` / `endAt` in Asia/Shanghai time (e.g.
@@ -41,6 +40,19 @@ All notable changes to `sustech-cli` are documented in this file.
   and `MASTER_PASSWORD_INVALID` (decryption failed). Remediation messages
   consistently mention `SUSTECH_MASTER_PASSWORD` or interactive unlock across
   `auth status`, `doctor`, and actual credential reads.
+
+### Fixed
+
+- Accept `tis schedule --date`, validate calendar dates before authentication,
+  and return only the requested day's classes. Resolve spring and summer terms
+  using the correct calendar year and anchor timestamps to the teaching week's
+  Monday with the date-appropriate class-period times. Week queries retain their
+  TIS results when calendar enrichment fails.
+- Use `SUSTECH_MASTER_PASSWORD` consistently for Linux encrypted credential
+  reads, writes, logout, and Blackboard calendar links; preserve an explicitly
+  supplied master password when resolving credentials.
+- Keep explicit update checks usable in pipes: report available releases without
+  prompting, and require `--yes` for non-interactive installation.
 
 ## [0.12.1] - 2026-09-12
 

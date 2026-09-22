@@ -256,7 +256,7 @@ export const COMMAND_OPTIONS: Readonly<Record<string, readonly CliOptionName[]>>
   "tis courses available": ["credentials-file", "semester", "limit", "round"],
   "tis courses detail": ["credentials-file", "semester", "rwh", "round"],
   "tis enrolled": ["credentials-file", "semester"],
-  "tis schedule": ["credentials-file", "semester", "week", "all"],
+  "tis schedule": ["credentials-file", "semester", "week", "date", "all"],
   "tis grades": ["credentials-file", "semester"],
   "tis exams": ["credentials-file"],
   "tis plan init": [

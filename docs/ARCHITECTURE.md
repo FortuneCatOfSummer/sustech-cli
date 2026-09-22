@@ -27,10 +27,17 @@ Asia/Shanghai clock times when day and period data are available.
 
 All periods are 50 minutes. When `tis schedule` queries a specific week
 (via `--week`, `--date`, or current-week resolution), personal schedule entries
-are enriched with full ISO-8601 timestamps: `startAt` / `endAt` fields in
+with known days and periods are enriched with full ISO-8601 timestamps when a
+matching calendar is available: `startAt` / `endAt` fields in
 Asia/Shanghai time (e.g. `2026-09-15T14:00:00+08:00`) that combine the class
 date with period-based clock times. The existing `periodStart` / `periodEnd`
 fields remain for compatibility.
+
+Dates are anchored to the Monday of the first teaching week, even when teaching
+starts later that week. `--date` filters to the selected weekday and requires the
+calendar; current-week and `--week` queries preserve the TIS results without
+timestamps if the calendar cannot be loaded. These fields represent the regular
+timetable and do not apply holiday or makeup-day adjustments.
 
 Catalog `schedule[]` slots span many weeks and lack a concrete date, so they
 retain period fields only without `startAt` / `endAt`. Agents answering

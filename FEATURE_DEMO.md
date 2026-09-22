@@ -5,8 +5,8 @@ This document demonstrates the new schedule UX improvements in `sustech-cli`.
 ## 1. Full ISO-8601 Datetime Timestamps
 
 When querying a specific week (`--week`, `--date`, or current-week default),
-personal schedule entries now include full ISO-8601 timestamps combining date
-and clock time:
+personal schedule entries with known days and periods can include full ISO-8601
+timestamps combining date and clock time, when the matching calendar is available:
 
 ```json
 {
@@ -38,6 +38,11 @@ and clock time:
 - **Catalog search** (`tis courses search`): `schedule[]` slots lack concrete
   dates, so only `periodStart` / `periodEnd` are provided
 
+Timestamps use the Monday of the first teaching week and the period timetable
+applicable to the class date. If the public calendar is unavailable, current-week
+and `--week` queries still return the TIS schedule without these optional fields.
+`--all` returns entries spanning the semester without concrete timestamps.
+
 ## 2. Date-Based Schedule Queries
 
 Query schedules by specific date instead of week number:
@@ -59,7 +64,13 @@ sustech tis schedule
 ### Benefits
 - More intuitive for "where is class on Friday?" questions
 - Automatically resolves teaching week from academic calendar
-- Validates date is within semester teaching period
+- Returns only entries for the requested weekday in that week
+- Validates the date belongs to a teaching week in the selected semester
+
+Date queries require the public calendar. Use `--semester` when querying another
+semester. These timestamps describe the regular timetable; this command does not
+apply holiday or makeup-day adjustments. The `context` and calendar-export flows
+use the calendar's holiday and makeup-day rules.
 
 ## 3. Structured Room Fields
 
