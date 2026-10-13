@@ -56,6 +56,7 @@ import {
   validateCredentialPassword,
   validateCredentialSid,
   validateProfileName,
+  type CredentialStoreOptions,
 } from "./core/keyring.js";
 import {
   inferOutputOptions,
@@ -737,6 +738,14 @@ function brandArt(): string {
   return formatBrandArt(shouldUseBrandColor(process.stdout.isTTY));
 }
 
+function credentialStoreOptionsFromEnv(): CredentialStoreOptions {
+  const encryptedStoreMasterPassword = process.env.SUSTECH_MASTER_PASSWORD;
+  return {
+    encryptedStoreMasterPassword,
+    promptForMasterPassword: encryptedStoreMasterPassword ? undefined : async () => await promptMasterPassword(),
+  };
+}
+
 async function main(argv: string[]): Promise<void> {
   let parsed: ReturnType<typeof parseArgs>;
   try {
@@ -772,7 +781,7 @@ async function main(argv: string[]): Promise<void> {
     }
   }
   if (parsed.positionals.length === 0) {
-    const credentials = await getCredentialStatus(values.profile);
+    const credentials = await getCredentialStatus(values.profile, credentialStoreOptionsFromEnv());
     process.stdout.write(`${formatDashboard({
       version: VERSION,
       runtime: `node ${process.version}`,
@@ -2172,6 +2181,7 @@ async function main(argv: string[]): Promise<void> {
 async function runAuth(positionals: readonly string[], values: Values, output: OutputOptions): Promise<void> {
   const [, command, operation] = positionals;
   if (operation !== undefined) throw usageError(`Unknown command: ${positionals.join(" ")}`);
+  const credentialStoreOptions = credentialStoreOptionsFromEnv();
 
   if (command === "login") {
     const environmentProfile = process.env.SUSTECH_PROFILE?.trim() || undefined;
@@ -2181,12 +2191,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
       throw usageError("--password-stdin requires --sid so stdin contains only the password.");
     }
 
-    const masterPasswordEnv = process.env.SUSTECH_MASTER_PASSWORD;
-    const promptForMasterPassword = masterPasswordEnv ? undefined : async () => await promptMasterPassword();
-    const backend = await getCredentialBackendStatus({
-      encryptedStoreMasterPassword: masterPasswordEnv,
-      promptForMasterPassword,
-    });
+    const backend = await getCredentialBackendStatus(credentialStoreOptions);
     if (!backend.available) {
       throw new CliError(
         backend.reason ?? "No secure system credential store is available.",
@@ -2204,10 +2209,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
       values["password-stdin"] ? await readPasswordFromStdin() : await promptHiddenPassword(),
     );
     const authenticated = await authenticateCredentials({ sid, password, source: "interactive" }, service);
-    const stored = await saveStoredCredentials({ profile, sid, password }, {
-      encryptedStoreMasterPassword: masterPasswordEnv,
-      promptForMasterPassword,
-    });
+    const stored = await saveStoredCredentials({ profile, sid, password }, credentialStoreOptions);
     const identity = authenticated.identity ? `\nIdentity: ${authenticated.identity}` : "";
     writeSuccess({
       command: "auth login",
@@ -2228,7 +2230,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
   }
 
   if (command === "status") {
-    const status = await getCredentialStatus(values.profile);
+    const status = await getCredentialStatus(values.profile, credentialStoreOptions);
     const availability = status.credentialAvailable ? "ready" : status.configured ? "secret missing or locked" : "not configured";
     const remediation = status.remediation ? `\n${status.remediation}` : "";
     writeSuccess({
@@ -2245,7 +2247,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
   }
 
   if (command === "logout") {
-    const result = await deleteStoredCredentials(values.profile);
+    const result = await deleteStoredCredentials(values.profile, credentialStoreOptions);
     writeSuccess({
       command: "auth logout",
       data: result,
@@ -2285,7 +2287,7 @@ async function runDoctor(values: Values, output: OutputOptions): Promise<void> {
     throw usageError("--browser is currently supported only when doctor includes Blackboard.");
   }
   const backend = await getCredentialBackendStatus();
-  const profile = await getCredentialStatus(values.profile);
+  const profile = await getCredentialStatus(values.profile, credentialStoreOptionsFromEnv());
   const liveResults: DoctorLiveResult[] = [];
   let credentialSource: string | undefined = values.browser && services.length === 1 && services[0] === "bb"
     ? "browser-session"
@@ -4352,13 +4354,14 @@ async function runBlackboard(
   const command = positionals[1];
   if (command === "calendar-link" && positionals.length === 3) {
     const operation = positionals[2];
+    const credentialStoreOptions = credentialStoreOptionsFromEnv();
     if (operation === "set") {
       if (values["url-stdin"] !== true) {
         throw usageError("bb calendar-link set requires --url-stdin so the private feed token is not placed in shell history.");
       }
       const url = await readCalendarLinkFromStdin();
       const verified = await fetchBlackboardCalendarFeed(url);
-      const saved = await saveBlackboardCalendarLink({ profile: values.profile, url });
+      const saved = await saveBlackboardCalendarLink({ profile: values.profile, url }, credentialStoreOptions);
       writeSuccess({
         command: "bb calendar-link set",
         data: {
@@ -4378,7 +4381,7 @@ async function runBlackboard(
       return;
     }
     if (operation === "show") {
-      const stored = await loadBlackboardCalendarLink(values.profile);
+      const stored = await loadBlackboardCalendarLink(values.profile, credentialStoreOptions);
       const reveal = values.reveal === true;
       writeSuccess({
         command: "bb calendar-link show",
@@ -4400,7 +4403,7 @@ async function runBlackboard(
       return;
     }
     if (operation === "fetch") {
-      const feed = await fetchStoredBlackboardCalendarFeed({ profile: values.profile });
+      const feed = await fetchStoredBlackboardCalendarFeed({ profile: values.profile, keyring: credentialStoreOptions });
       if (values.destination) {
         const written = await writeIcsFile(feed.content, values.destination, { overwrite: values.overwrite === true });
         writeSuccess({
@@ -4432,7 +4435,7 @@ async function runBlackboard(
       return;
     }
     if (operation === "delete") {
-      const removed = await deleteBlackboardCalendarLink(values.profile);
+      const removed = await deleteBlackboardCalendarLink(values.profile, credentialStoreOptions);
       writeSuccess({
         command: "bb calendar-link delete",
         data: removed,

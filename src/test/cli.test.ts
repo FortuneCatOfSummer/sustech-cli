@@ -11,6 +11,7 @@ import {
   buildBookingCreateApplyConfirmation,
   buildLibraryBookingCreateApplyConfirmation,
 } from "../cli-confirmations.js";
+import { saveStoredCredentials } from "../core/keyring.js";
 
 const CLI_PATH = fileURLToPath(new URL("../cli.js", import.meta.url));
 
@@ -56,6 +57,52 @@ test("bare invocation shows a local account dashboard while explicit help stays 
   assert.equal(help.status, 0);
   assert.doesNotMatch(help.stdout, /:\*##: :#######:/);
   assert.match(help.stdout, /^sustech — SUSTech services/);
+});
+
+test("auth status and logout unlock the Linux encrypted-file store from the master-password environment", async () => {
+  const configRoot = mkdtempSync(join(tmpdir(), "sustech-cli-encrypted-cli-"));
+  const configDir = join(configRoot, "sustech-cli");
+  const masterPassword = "test-master-password-123";
+  const profile = "encrypted";
+  try {
+    await saveStoredCredentials(
+      { profile, sid: "12410000", password: "user-password" },
+      {
+        configDir,
+        platform: "linux",
+        env: { PATH: "" },
+        encryptedStoreMasterPassword: masterPassword,
+      },
+    );
+    const platformFixture = join(configRoot, "linux-platform.mjs");
+    writeFileSync(platformFixture, 'Object.defineProperty(process, "platform", { value: "linux" });\n');
+    const env = {
+      ...process.env,
+      DBUS_SESSION_BUS_ADDRESS: "",
+      SUSTECH_DISABLE_SYSTEM_KEYRING: "",
+      SUSTECH_MASTER_PASSWORD: masterPassword,
+      XDG_CONFIG_HOME: configRoot,
+    };
+    const runEncrypted = (args: string[]) => spawnSync(
+      process.execPath,
+      ["--import", pathToFileURL(platformFixture).href, CLI_PATH, ...args],
+      { encoding: "utf8", env },
+    );
+
+    const status = runEncrypted(["auth", "status", "--profile", profile, "--json"]);
+    assert.equal(status.status, 0, status.stderr || status.stdout);
+    assert.equal(JSON.parse(status.stdout).data.credentialAvailable, true);
+
+    const logout = runEncrypted(["auth", "logout", "--profile", profile, "--json"]);
+    assert.equal(logout.status, 0, logout.stderr || logout.stdout);
+    assert.deepEqual(JSON.parse(logout.stdout).data, {
+      profile,
+      removed: true,
+      backend: "linux-encrypted-file",
+    });
+  } finally {
+    rmSync(configRoot, { recursive: true, force: true });
+  }
 });
 
 test("compiled CLI keeps parse and output-conflict errors machine-readable", () => {
