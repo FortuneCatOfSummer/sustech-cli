@@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
 import { CliError } from "./errors.js";
 import { EncryptedStore } from "./encrypted-store.js";
 import { defaultConfigDirectory } from "./local-store.js";
+import { clearSessionCaches } from "./session-cache.js";
 
 export const DEFAULT_CREDENTIAL_PROFILE = "default";
 export const SUSTECH_CREDENTIAL_SERVICE = "cn.edu.sustech.cli.cas";
@@ -217,6 +218,7 @@ export async function deleteStoredCredentials(
   const config = await readCredentialConfig(options);
   const profile = selectedProfile(requestedProfile, options.env);
   const existing = config.profiles[profile];
+  await clearSessionCaches(profile, credentialConfigDirectory(options));
   if (!existing) return { profile, removed: false, backend: "unavailable" };
 
   const resolution = await resolveBackendForNamespace(options, CREDENTIAL_SECRET_NAMESPACE);

@@ -128,7 +128,7 @@ export const CAPABILITIES: readonly Capability[] = [
   capability("pms delete apply", "Delete one exact queued PMS print job after live revalidation.", "mutation", { authentication: "pms", confirmation: "required", status: "preview" }),
   capability("auth login", "Verify credentials and save them in the operating-system credential store.", "mutation", { status: "preview" }),
   capability("auth status", "Inspect credential-profile and system-store availability without exposing secrets.", "local", { status: "preview" }),
-  capability("auth logout", "Delete one local credential profile from the operating-system credential store.", "mutation", { network: false, status: "preview" }),
+  capability("auth logout", "Delete one local credential profile and its cached service sessions.", "mutation", { network: false, status: "preview" }),
   capability("auth check", "Verify credentials against TIS, Blackboard, WS, booking, lib-booking (library-booking alias), or PMS.", "read", { authentication: "selected-service", status: "preview" }),
   capability("tis courses search", "Search the campus-wide course catalog.", "read", { authentication: "tis", status: "preview" }),
   capability("tis courses available", "Search courses available to the authenticated student.", "read", { authentication: "tis", status: "preview" }),

@@ -3,8 +3,10 @@
 `sustech-cli` separates long-lived account credentials from short-lived service
 sessions. An account password may be persisted only in the operating system's
 credential store. Blackboard's native calendar subscription link is handled as
-a separate secret. CAS cookies, bearer tokens, PMS session IDs, nonces, and
-submission state remain in memory.
+a separate secret. Blackboard service cookies are cached locally with
+AES-256-GCM encryption and a key derived from the account password using scrypt.
+CAS ticket-granting cookies, other services' tokens, nonces, and submission state
+remain in memory.
 
 ## Local desktop login
 
@@ -40,7 +42,73 @@ For Blackboard only, `auth check` and `doctor --live` also support a separate
 read-only browser-backed verification path. Use `--browser` to request that
 path, and add `--interactive` when you need to complete the CAS page manually
 in the opened browser window. This path does not accept browser credentials in
-the CLI and does not persist browser cookies.
+the CLI. With an existing credential profile, `auth check --service bb --browser
+--interactive` also saves the verified Blackboard cookies for subsequent normal
+CLI commands. The browser account must match the selected profile. Without
+available credentials, browser verification remains session-only.
+
+## Blackboard session reuse
+
+After a successful CLI login, subsequent BB commands reuse the encrypted cookie
+cache instead of submitting the password to CAS again. Each new session checks
+`/learn/api/public/v1/users/me` and verifies the account before using the cache.
+Expired or rejected cookies are discarded and the CLI signs in again; a network
+outage does not trigger another password login. CAPTCHA still requires manual
+completion through the official browser page.
+
+The cache lives under `sessions/` in the configuration directory described below,
+with separate entries for each profile, SID, and service. Files use mode `0600`
+and directories use `0700` on POSIX systems. Cookie expiry/deletion is respected,
+and a cached login has a maximum local lifetime of seven days. Cookies refreshed
+by Blackboard are saved without extending that lifetime. Changing the password
+makes the old cache unreadable. If local cache storage is unavailable, the current
+login can still be used in memory.
+
+`auth logout --profile NAME` removes that profile's cached sessions as well as
+its stored credentials. The CLI does not import Safari's login session. To seed
+the cache while CAS requires a CAPTCHA, use the selected stored profile:
+
+```bash
+sustech auth check --service bb --browser --interactive --profile default
+sustech bb courses --profile default
+sustech bb deadlines --profile default
+```
+
+Only read requests may be retried after session expiry. Submission and other
+write requests are never replayed automatically.
+
+### Chrome, Edge, and Chromium
+
+Choose a browser for a manual login, then reuse the saved session with normal
+BB commands:
+
+```bash
+sustech auth check --service bb --browser --browser-channel chrome --interactive
+sustech auth check --service bb --browser --browser-channel msedge --interactive
+sustech bb courses
+```
+
+To reuse a browser that already exposes a local Chrome DevTools Protocol (CDP)
+endpoint, select it explicitly:
+
+```bash
+sustech auth check --service bb --browser --browser-cdp-url http://127.0.0.1:9222
+```
+
+The CLI opens one BB tab in that browser's existing default context, reads only
+BB-domain cookies, verifies the selected account, and saves the encrypted CLI
+cache. It closes its own tab and disconnects while preserving existing tabs and
+the browser. Add `--interactive` if that browser still needs a manual login.
+`doctor --live --service bb --browser` accepts the same browser selectors for
+diagnostics; use `auth check` to save the session.
+
+CDP must already be enabled by the user. Endpoints are restricted to loopback
+HTTP(S) or browser WebSocket URLs, without URL credentials, queries, or fragments.
+HTTP discovery rejects redirects and validates the advertised WebSocket endpoint.
+Chrome 136 and later require a dedicated, non-default `--user-data-dir` for
+remote debugging; see the [Chrome documentation](https://developer.chrome.com/blog/remote-debugging-port).
+This path therefore reuses the session in the selected CDP browser profile;
+ordinary Chrome/Edge windows without a CDP endpoint are not automatically imported.
 
 ## Primo browser mode
 
@@ -222,5 +290,5 @@ external runner already protects that file.
   capability output.
 - Blackboard calendar-link storage never writes the link token into
   `credentials.json`.
-- `auth logout` deletes the system-store item and its local profile metadata;
+- `auth logout` deletes cached sessions, the system-store item, and local profile metadata;
   it does not alter the SUSTech account itself.

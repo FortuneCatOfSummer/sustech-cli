@@ -1,2 +1,2 @@
-export const CLI_VERSION = "0.12.1";
+export const CLI_VERSION = "0.13.0";
 export const USER_AGENT = `sustech-cli/${CLI_VERSION} (+https://github.com/wormforce/sustech-cli)`;

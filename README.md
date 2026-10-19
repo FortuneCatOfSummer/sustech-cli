@@ -61,6 +61,14 @@ sustech tis schedule
 sustech bb deadlines --days 14
 ```
 
+BB commands reuse an encrypted local session until it expires. If CAS requires
+a CAPTCHA and credentials are already stored, complete one manual login with
+`sustech auth check --service bb --browser --interactive`; later BB commands can
+reuse that session. `sustech auth logout` also clears the cached session.
+Choose Chrome or Edge with `--browser-channel chrome|msedge`, or reuse an existing
+local debugging session with `--browser-cdp-url http://127.0.0.1:9222` on
+`auth check --service bb --browser`. See [session reuse](docs/AUTHENTICATION.md#chrome-edge-and-chromium).
+
 Try a command without installing globally:
 
 ```bash
