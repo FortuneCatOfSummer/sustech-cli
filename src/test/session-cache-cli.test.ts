@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 test("separate CLI processes reuse a BB session, honor explicit profiles and clear it on logout", async () => {
@@ -45,7 +45,7 @@ test("separate CLI processes reuse a BB session, honor explicit profiles and cle
   };
   const cli = fileURLToPath(new URL("../cli.js", import.meta.url));
   function run(...args: string[]): Record<string, unknown> {
-    const result = spawnSync(process.execPath, ["--import", fixture, cli, ...args, "--json"], {
+    const result = spawnSync(process.execPath, ["--import", pathToFileURL(fixture).href, cli, ...args, "--json"], {
       env, encoding: "utf8", timeout: 20_000,
     });
     assert.equal(result.status, 0, result.stdout + result.stderr);
