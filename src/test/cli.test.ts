@@ -12,8 +12,24 @@ import {
   buildLibraryBookingCreateApplyConfirmation,
 } from "../cli-confirmations.js";
 import { saveStoredCredentials } from "../core/keyring.js";
+import { CLI_VERSION } from "../core/version.js";
 
 const CLI_PATH = fileURLToPath(new URL("../cli.js", import.meta.url));
+
+test("browser selectors are discoverable and reject invalid combinations before authentication", () => {
+  const description = JSON.parse(run(["describe", "auth", "check", "--json"]).stdout).data;
+  assert.ok(description.options.some((option: { name: string }) => option.name === "--browser-cdp-url"));
+  for (const args of [
+    ["--browser-channel", "chrome"],
+    ["--browser", "--browser-channel", "invalid"],
+    ["--browser", "--browser-cdp-url", "http://evil.example:9222"],
+    ["--browser", "--browser-channel", "chrome", "--browser-cdp-url", "http://localhost:9222"],
+  ]) {
+    const result = runWithoutCredentials(["auth", "check", "--service", "bb", ...args, "--json"]);
+    assert.equal(result.status, 2);
+    assert.ok(["USAGE", "BROWSER_CDP_INVALID"].includes(JSON.parse(result.stdout).error.code));
+  }
+});
 
 test("TIS detail is discoverable and validates course selectors before authentication", () => {
   const described = run(["describe", "tis", "courses", "detail", "--json"]);
@@ -32,7 +48,7 @@ test("compiled CLI serves human text and versioned JSON from the real entrypoint
   const text = run(["version"]);
   assert.equal(text.status, 0);
   assert.match(text.stdout, /:\*##: :#######:/);
-  assert.match(text.stdout, /sustech-cli 0\.12\.1/);
+  assert.ok(text.stdout.includes(`sustech-cli ${CLI_VERSION}`));
   assert.doesNotMatch(text.stdout, /\u001b\[/);
 
   const json = run(["version", "--json"]);
@@ -41,7 +57,7 @@ test("compiled CLI serves human text and versioned JSON from the real entrypoint
     schemaVersion: "1",
     ok: true,
     command: "version",
-    data: { version: "0.12.1", runtime: `node ${process.version}` },
+    data: { version: CLI_VERSION, runtime: `node ${process.version}` },
   });
 });
 

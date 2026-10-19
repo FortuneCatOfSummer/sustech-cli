@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { authenticateBlackboardBrowserSession, authenticateCredentials } from "../core/auth-check.js";
+import { SessionCache } from "../core/session-cache.js";
 import { CliError } from "../core/errors.js";
 import { BLACKBOARD_BROWSER_AUTH_POLICY, type BlackboardBrowserRuntime, type BlackboardBrowserSession } from "../services/blackboard-browser.js";
 import { TisSession } from "../tis/auth.js";
@@ -152,6 +156,37 @@ test("Blackboard browser auth checks read the official users/me endpoint without
     identity: "Student Name",
   });
   assert.deepEqual(requests, ["GET https://bb.sustech.edu.cn/learn/api/public/v1/users/me"]);
+});
+
+test("manual browser verification seeds the encrypted cache only for the matching credential profile", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sustech-browser-cache-"));
+  const originalConfig = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = directory;
+  const service = "https://bb.sustech.edu.cn/webapps/bb-sso-BBLEARN/index.jsp";
+  const account = { ...credentials, sid: "12200000", profile: "manual" };
+  try {
+    const result = await authenticateBlackboardBrowserSession({
+      interactive: true,
+      credentials: account,
+      runtime: new FakeBlackboardRuntime(),
+      fetchImpl: async () => responseWithUrl(JSON.stringify({ id: "_1_1", userName: account.sid }), 200,
+        "https://bb.sustech.edu.cn/learn/api/public/v1/users/me", { "content-type": "application/json" }),
+    });
+    assert.equal(result.sessionCached, true);
+    const cache = new SessionCache(account, service);
+    assert.equal((await cache.load() as { value: string }[])[0].value, "cookie-1");
+    await assert.rejects(authenticateBlackboardBrowserSession({
+      credentials: { ...account, profile: "wrong", sid: "other-account" },
+      runtime: new FakeBlackboardRuntime(),
+      fetchImpl: async () => responseWithUrl(JSON.stringify({ id: "_1_1", userName: account.sid }), 200,
+        "https://bb.sustech.edu.cn/learn/api/public/v1/users/me", { "content-type": "application/json" }),
+    }), { code: "AUTHENTICATION_FAILED" });
+    assert.equal(await new SessionCache({ ...account, profile: "wrong", sid: "other-account" }, service).load(), undefined);
+  } finally {
+    if (originalConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalConfig;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 class FakeBlackboardRuntime implements BlackboardBrowserRuntime {

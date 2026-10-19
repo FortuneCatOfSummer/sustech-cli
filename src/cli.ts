@@ -45,6 +45,7 @@ import { CONSEQUENCES, consequenceByOperation, formatConsequences } from "./core
 import { resolveCredentials, type Credentials } from "./core/credentials.js";
 import { formatDashboard } from "./core/dashboard.js";
 import { CliError, ConfirmationRequiredError } from "./core/errors.js";
+import { validateBlackboardBrowserOptions, type BlackboardBrowserOptions } from "./services/blackboard-browser.js";
 import { assertPathAndParentsAreNotSymlinks } from "./core/local-store.js";
 import {
   DEFAULT_CREDENTIAL_PROFILE,
@@ -435,6 +436,7 @@ Usage:
   sustech auth status [--profile NAME]
   sustech auth logout [--profile NAME]
   sustech auth check [--profile NAME] [--service tis|bb|ws|booking|lib-booking|library-booking|pms] [--credentials-file PATH] [--browser [--interactive]] [--json|--jsonl]
+    Blackboard: --browser-channel chromium|chrome|msedge or --browser-cdp-url LOOPBACK_URL
   sustech calendar terms [--year YYYY] [--calendar-level undergraduate|graduate]
   sustech calendar day [YYYY-MM-DD|--date YYYY-MM-DD] [--calendar-level undergraduate|graduate]
   sustech academic snapshot save --destination PATH [--semester YYYY-YYYY-N] [--include-blackboard] [--overwrite]
@@ -718,6 +720,8 @@ type Values = OutputFlags & {
   reveal?: boolean;
   "include-blackboard"?: boolean;
   browser?: boolean;
+  "browser-channel"?: string;
+  "browser-cdp-url"?: string;
   interactive?: boolean;
   "with-attempts"?: boolean;
   "all-reviews"?: boolean;
@@ -2208,7 +2212,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
     const password = validateCredentialPassword(
       values["password-stdin"] ? await readPasswordFromStdin() : await promptHiddenPassword(),
     );
-    const authenticated = await authenticateCredentials({ sid, password, source: "interactive" }, service);
+    const authenticated = await authenticateCredentials({ sid, password, source: "interactive", profile }, service);
     const stored = await saveStoredCredentials({ profile, sid, password }, credentialStoreOptions);
     const identity = authenticated.identity ? `\nIdentity: ${authenticated.identity}` : "";
     writeSuccess({
@@ -2264,10 +2268,13 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
     const credentialsStored = result.credentialSource === "system-keyring";
     const data = { ...result, service, credentialsStored };
     const identity = result.identity ? `\nIdentity: ${result.identity}` : "";
+    const sessionNote = result.sessionCached === undefined ? "" : result.sessionCached
+      ? "\nSession cached for subsequent Blackboard commands."
+      : "\nSession cache unavailable; this login is session-only.";
     writeSuccess({
       command: "auth check",
       data,
-      text: `${service.toUpperCase()} ${formatAuthCheck(result.credentialSource, credentialsStored)}${identity}`,
+      text: `${service.toUpperCase()} ${formatAuthCheck(result.credentialSource, credentialsStored)}${identity}${sessionNote}`,
     }, output);
     return;
   }
@@ -2276,6 +2283,7 @@ async function runAuth(positionals: readonly string[], values: Values, output: O
 }
 
 async function runDoctor(values: Values, output: OutputOptions): Promise<void> {
+  const browserOptions = selectedBlackboardBrowserOptions(values);
   const services = doctorServices(values.service);
   if (values.browser && !values.live) {
     throw usageError("--browser requires --live for doctor.");
@@ -2312,7 +2320,7 @@ async function runDoctor(values: Values, output: OutputOptions): Promise<void> {
     for (const service of services) {
       try {
         const result = service === "bb" && values.browser
-          ? await authenticateBlackboardBrowserSession({ interactive: values.interactive })
+          ? await authenticateBlackboardBrowserSession(browserOptions)
           : await authenticateCredentials(await liveCredentials(), service);
         liveResults.push({
           service,
@@ -2357,7 +2365,9 @@ async function checkAuthentication(
   identity?: string;
   profile?: string;
   credentialBackend?: string;
+  sessionCached?: boolean;
 }> {
+  const browserOptions = selectedBlackboardBrowserOptions(values);
   if (values.interactive && !values.browser) {
     throw usageError("--interactive requires --browser for Blackboard auth checks.");
   }
@@ -2365,7 +2375,13 @@ async function checkAuthentication(
     if (service !== "bb") {
       throw usageError("--browser is currently supported only for Blackboard auth checks.");
     }
-    return authenticateBlackboardBrowserSession({ interactive: values.interactive });
+    let credentials: Credentials | undefined;
+    try {
+      credentials = await resolvedCredentials(values);
+    } catch (error) {
+      if (!(error instanceof CliError) || error.code !== "CREDENTIALS_REQUIRED") throw error;
+    }
+    return authenticateBlackboardBrowserSession({ ...browserOptions, credentials });
   }
   const credentials = await resolvedCredentials(values);
   const result = await authenticateCredentials(credentials, service);
@@ -2374,6 +2390,19 @@ async function checkAuthentication(
     ...(credentials.profile ? { profile: credentials.profile } : {}),
     ...(credentials.backend ? { credentialBackend: credentials.backend } : {}),
   };
+}
+
+function selectedBlackboardBrowserOptions(values: Values): BlackboardBrowserOptions {
+  if ((values["browser-channel"] !== undefined || values["browser-cdp-url"] !== undefined) && !values.browser) {
+    throw usageError("--browser-channel and --browser-cdp-url require --browser.");
+  }
+  const options: BlackboardBrowserOptions = {
+    interactive: values.interactive,
+    channel: values["browser-channel"] as BlackboardBrowserOptions["channel"],
+    cdpUrl: values["browser-cdp-url"],
+  };
+  validateBlackboardBrowserOptions(options);
+  return options;
 }
 
 async function authenticateCredentials(
@@ -2407,10 +2436,14 @@ async function authenticatedCasService(
 }
 
 async function resolvedCredentials(values: Values): Promise<Credentials> {
-  return resolveCredentials({
+  const credentials = await resolveCredentials({
     credentialsFile: values["credentials-file"],
     profile: values.profile,
   });
+  return {
+    ...credentials,
+    profile: credentials.profile ?? validateProfileName(values.profile ?? (process.env.SUSTECH_PROFILE?.trim() || DEFAULT_CREDENTIAL_PROFILE)),
+  };
 }
 
 async function casServiceAdapter(values: Values, service: "bb" | "ws"): Promise<ServiceAdapter> {

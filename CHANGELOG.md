@@ -4,8 +4,18 @@ All notable changes to `sustech-cli` are documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-19
+
 ### Added
 
+- Blackboard commands reuse an encrypted local cookie cache across processes,
+  validate the selected account before reuse, and sign in again when it expires.
+  A manual `auth check --service bb --browser --interactive` can seed the cache
+  for an existing credential profile. `auth logout` clears that profile's cached
+  sessions; write requests are never replayed after session expiry.
+- Select Chrome, Edge, or Chromium for browser login, or reuse an existing
+  loopback CDP browser session with `auth check --service bb --browser
+  --browser-cdp-url URL`. Existing tabs and the browser remain open.
 - Check the official npm release once per day in interactive terminals and ask
   before updating. Add `sustech update [--yes]` for an explicit check or
   confirmed install, while keeping CI, pipes, JSON, and JSONL prompt-free.

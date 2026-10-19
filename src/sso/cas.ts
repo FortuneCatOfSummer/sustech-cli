@@ -1,16 +1,11 @@
 import type { Credentials } from "../core/credentials.js";
 import { CliError } from "../core/errors.js";
 import { USER_AGENT } from "../core/version.js";
+import { SessionCache } from "../core/session-cache.js";
+import { CookieJar, type SessionCookie } from "./cookies.js";
 
 const CAS_BASE = "https://cas.sustech.edu.cn/cas";
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-interface Cookie {
-  name: string;
-  value: string;
-  domain: string;
-  path: string;
-}
 
 export interface CasServiceConfig {
   name: string;
@@ -19,43 +14,7 @@ export interface CasServiceConfig {
   submitValue?: string | null;
   allowedRedirectHosts?: readonly string[];
   timeoutMs?: number;
-}
-
-class CookieJar {
-  private readonly cookies = new Map<string, Cookie>();
-
-  public add(response: Response, responseUrl: string): void {
-    const headers = response.headers as Headers & { getSetCookie?: () => string[] };
-    const values = headers.getSetCookie?.() ?? singleSetCookie(headers);
-    const defaultDomain = new URL(responseUrl).hostname;
-
-    for (const raw of values) {
-      const [first, ...attributes] = raw.split(";");
-      const delimiter = first.indexOf("=");
-      if (delimiter <= 0) continue;
-      const name = first.slice(0, delimiter).trim();
-      const value = first.slice(delimiter + 1).trim();
-      let domain = defaultDomain;
-      let path = "/";
-      for (const attribute of attributes) {
-        const delimiter = attribute.indexOf("=");
-        const attributeName = (delimiter >= 0 ? attribute.slice(0, delimiter) : attribute).trim().toLowerCase();
-        const attributeValue = delimiter >= 0 ? attribute.slice(delimiter + 1).trim() : "";
-        if (attributeName === "domain" && attributeValue) {
-          domain = attributeValue.replace(/^\./, "").toLowerCase();
-        }
-        if (attributeName === "path" && attributeValue) path = attributeValue;
-      }
-      this.cookies.set(`${name}|${domain}|${path}`, { name, value, domain, path });
-    }
-  }
-
-  public header(url: URL): string | undefined {
-    const values = [...this.cookies.values()]
-      .filter((cookie) => domainMatches(url.hostname, cookie.domain) && url.pathname.startsWith(cookie.path))
-      .map((cookie) => `${cookie.name}=${cookie.value}`);
-    return values.length > 0 ? values.join("; ") : undefined;
-  }
+  sessionCache?: { validationPath: string; configDir?: string };
 }
 
 export class CasSession {
@@ -64,6 +23,9 @@ export class CasSession {
   private readonly serviceUrl: URL;
   private readonly allowedRedirectHosts: ReadonlySet<string>;
   private authenticated = false;
+  private readonly cache?: SessionCache;
+  private loginPromise?: Promise<void>;
+  private cacheWrite: Promise<boolean> = Promise.resolve(false);
 
   public constructor(
     private readonly credentials: Credentials,
@@ -71,6 +33,13 @@ export class CasSession {
   ) {
     this.baseUrl = httpsUrl(config.baseUrl, "baseUrl");
     this.serviceUrl = httpsUrl(config.serviceUrl, "serviceUrl");
+    if (config.sessionCache) {
+      const validationUrl = new URL(config.sessionCache.validationPath, this.baseUrl);
+      if (validationUrl.origin !== this.baseUrl.origin) {
+        throw new CliError("Session validation must stay on the service origin.", "UNSAFE_SERVICE_URL", 1);
+      }
+      this.cache = new SessionCache(credentials, this.serviceUrl.toString(), config.sessionCache.configDir);
+    }
     const casHost = new URL(CAS_BASE).hostname;
     this.allowedRedirectHosts = new Set([
       casHost,
@@ -82,6 +51,21 @@ export class CasSession {
 
   public async login(): Promise<void> {
     if (this.authenticated) return;
+    if (!this.loginPromise) {
+      this.loginPromise = this.loginOnce().finally(() => { this.loginPromise = undefined; });
+    }
+    return this.loginPromise;
+  }
+
+  private async loginOnce(): Promise<void> {
+    if (this.cache) {
+      if (this.cookies.restore(await this.cache.load(), this.baseUrl) && await this.validateCachedSession()) {
+        this.authenticated = true;
+        await this.persistCookies();
+        return;
+      }
+      await this.invalidateCache();
+    }
     const loginUrl = `${CAS_BASE}/login?service=${encodeURIComponent(this.serviceUrl.toString())}`;
     const loginPage = await this.requestRaw(loginUrl);
     if (!loginPage.ok) {
@@ -91,6 +75,12 @@ export class CasSession {
       });
     }
     const page = await loginPage.text();
+    // A CAS SSO redirect may already have completed the service login.
+    if (loginPage.url && new URL(loginPage.url).origin === this.baseUrl.origin) {
+      this.authenticated = true;
+      await this.persistCookies();
+      return;
+    }
     const execution = /name=["']execution["']\s+value=["']([^"']+)["']/.exec(page)?.[1];
     if (!execution) {
       throw new CliError("CAS login page did not include an execution token.", "CAS_PROTOCOL_ERROR", 1, {
@@ -133,6 +123,49 @@ export class CasSession {
       );
     }
     this.authenticated = true;
+    await this.persistCookies();
+  }
+
+  /** Seed the same encrypted cache after a user completes the official browser login. */
+  public async saveBrowserSession(cookies: SessionCookie[], verifiedUsername: string): Promise<boolean> {
+    if (!this.cache || verifiedUsername !== this.credentials.sid || !this.cookies.restore(cookies, this.baseUrl)) {
+      throw new CliError("The browser session does not match the selected account.", "AUTHENTICATION_FAILED", 2);
+    }
+    return this.persistCookies();
+  }
+
+  private async validateCachedSession(): Promise<boolean> {
+    const url = new URL(this.config.sessionCache!.validationPath, this.baseUrl);
+    const response = await this.requestRaw(url.toString(), { redirect: "manual", headers: { accept: "application/json" } });
+    if (response.status >= 500 || response.status === 429) {
+      throw new CliError(`${this.config.name} session check is unavailable.`, "SERVICE_HTTP_ERROR", 1, {
+        service: this.config.name, status: response.status,
+      });
+    }
+    if (!response.ok || !(response.headers.get("content-type") ?? "").toLowerCase().includes("json")) return false;
+    const user = await response.json().catch(() => undefined) as { userName?: unknown } | undefined;
+    return user?.userName === this.credentials.sid;
+  }
+
+  private async persistCookies(): Promise<boolean> {
+    // Storage is an optimization: an unavailable cache must not break a live session.
+    this.cacheWrite = this.cacheWrite.then(async () => {
+      if (!this.cache) return false;
+      const cookies = this.cookies.snapshot(this.baseUrl);
+      if (cookies.length === 0) {
+        await this.cache.clear();
+        return false;
+      }
+      await this.cache.save(cookies);
+      return true;
+    }).catch(() => false);
+    return this.cacheWrite;
+  }
+
+  private async invalidateCache(): Promise<void> {
+    this.authenticated = false;
+    this.cookies.clear();
+    await this.cache?.clear().catch(() => undefined);
   }
 
   public async get(path: string, headers: Record<string, string> = {}): Promise<Response> {
@@ -208,7 +241,6 @@ export class CasSession {
   }
 
   protected async requestService(path: string, init: RequestInit = {}): Promise<Response> {
-    if (!this.authenticated) await this.login();
     const url = new URL(path, this.baseUrl);
     if (url.origin !== this.baseUrl.origin) {
       throw new CliError("A service request attempted to leave its configured origin.", "UNSAFE_SERVICE_URL", 1, {
@@ -216,7 +248,21 @@ export class CasSession {
         host: url.hostname,
       });
     }
-    const response = await this.requestRaw(url.toString(), init);
+    if (!this.authenticated) await this.login();
+    let response = await this.requestRaw(url.toString(), init);
+    if (this.cache && this.isExpiredResponse(response)) {
+      await this.invalidateCache();
+      const method = (init.method ?? "GET").toUpperCase();
+      if ((method === "GET" || method === "HEAD") && init.body === undefined) {
+        await this.login();
+        response = await this.requestRaw(url.toString(), init);
+      }
+      if (this.isExpiredResponse(response)) {
+        await this.invalidateCache();
+        throw new CliError(`${this.config.name} session expired.`, "SERVICE_SESSION_EXPIRED", 1, { service: this.config.name });
+      }
+    }
+    await this.persistCookies();
     if (!response.ok) {
       const bodySample = await response.clone().text()
         .then((text) => collapseText(text).slice(0, 160))
@@ -229,6 +275,15 @@ export class CasSession {
       });
     }
     return response;
+  }
+
+  private isExpiredResponse(response: Response): boolean {
+    if (response.status === 401) return true;
+    const url = response.headers.get("location") ?? response.url;
+    if (!url) return false;
+    const target = new URL(url, this.baseUrl);
+    return target.hostname === new URL(CAS_BASE).hostname
+      || (target.origin === this.baseUrl.origin && target.pathname.startsWith("/webapps/login/"));
   }
 
   private async parseJson(response: Response, path: string): Promise<unknown> {
@@ -292,6 +347,10 @@ export class CasSession {
           to: nextUrl.hostname,
         });
       }
+      // Let the caller handle expiration before following a service request back to CAS.
+      if (this.cache && new URL(url).origin === this.baseUrl.origin && nextUrl.hostname === new URL(CAS_BASE).hostname) {
+        return response;
+      }
       currentUrl = nextUrl.toString();
       if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
         method = "GET";
@@ -310,17 +369,8 @@ function requiresInteractiveCaptcha(page: string): boolean {
     && /(?:slideVerify|captchaVerification|su-recaptcha)/i.test(page);
 }
 
-function singleSetCookie(headers: Headers): string[] {
-  const value = headers.get("set-cookie");
-  return value ? [value] : [];
-}
-
 function collapseText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
-}
-
-function domainMatches(hostname: string, domain: string): boolean {
-  return hostname === domain || hostname.endsWith(`.${domain}`);
 }
 
 function httpsUrl(value: string, field: string): URL {

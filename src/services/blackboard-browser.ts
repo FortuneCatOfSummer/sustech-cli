@@ -22,6 +22,8 @@ export const BLACKBOARD_BROWSER_AUTH_POLICY = {
 export interface BlackboardBrowserOptions {
   interactive?: boolean;
   executablePath?: string;
+  channel?: "chromium" | "chrome" | "msedge";
+  cdpUrl?: string;
   renderTimeoutMs?: number;
   manualAuthTimeoutMs?: number;
 }
@@ -146,11 +148,14 @@ export async function createBlackboardBrowserAdapter(
 }
 
 export class PlaywrightBlackboardBrowserRuntime implements BlackboardBrowserRuntime {
+  public constructor(private readonly browserType = chromium) {}
+
   public async authenticate(options: BlackboardBrowserOptions = {}): Promise<BlackboardBrowserSession> {
+    validateBlackboardBrowserOptions(options);
     return this.withPage(options, async (page, context) => {
       const renderTimeoutMs = boundedTimeout(options.renderTimeoutMs, DEFAULT_RENDER_TIMEOUT_MS);
       try {
-        await page.goto(BLACKBOARD_SERVICE_URL, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs });
+        await page.goto(options.cdpUrl ? BLACKBOARD_BASE : BLACKBOARD_SERVICE_URL, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs });
       } catch (error) {
         throw browserAuthError("Blackboard browser authentication could not open the login entrypoint.", page.url() || BLACKBOARD_SERVICE_URL, error);
       }
@@ -215,7 +220,7 @@ export class PlaywrightBlackboardBrowserRuntime implements BlackboardBrowserRunt
       }
 
       const cookies = (await context.cookies(BLACKBOARD_BASE))
-        .filter((cookie) => domainMatches(new URL(BLACKBOARD_BASE).hostname, cookie.domain))
+        .filter((cookie) => normaliseCookieDomain(cookie.domain) === new URL(BLACKBOARD_BASE).hostname)
         .map((cookie) => ({
           name: cookie.name,
           value: cookie.value,
@@ -247,27 +252,91 @@ export class PlaywrightBlackboardBrowserRuntime implements BlackboardBrowserRunt
     options: BlackboardBrowserOptions,
     operation: (page: Page, context: BrowserContext) => Promise<T>,
   ): Promise<T> {
-    const browser = await launchLocalChromium(options);
+    const attached = Boolean(options.cdpUrl);
+    let browser: Browser;
+    if (options.cdpUrl) {
+      try {
+        browser = await this.browserType.connectOverCDP(await resolveCdpEndpoint(options.cdpUrl), {
+          timeout: boundedTimeout(options.renderTimeoutMs, DEFAULT_RENDER_TIMEOUT_MS), noDefaults: true,
+        });
+      } catch (error) {
+        if (error instanceof CliError) throw error;
+        throw new CliError("Could not connect to the selected local Chromium browser.", "BROWSER_CDP_UNAVAILABLE", 1, {
+          hint: "Use the loopback CDP endpoint of a browser started with a dedicated user-data directory.",
+        });
+      }
+    } else {
+      browser = await launchLocalChromium(options, this.browserType);
+    }
     let context: BrowserContext | undefined;
+    let page: Page | undefined;
     try {
-      context = await browser.newContext();
-      const page = await context.newPage();
+      context = attached ? browser.contexts()[0] : await browser.newContext();
+      if (!context) throw new CliError("The selected browser has no reusable context.", "BROWSER_CDP_UNAVAILABLE", 1);
+      page = await context.newPage();
       return await operation(page, context);
     } finally {
-      await context?.close().catch(() => undefined);
+      await page?.close().catch(() => undefined);
+      if (!attached) await context?.close().catch(() => undefined);
+      // For CDP connections this disconnects; the existing browser/context stays open.
       await browser.close().catch(() => undefined);
     }
   }
 }
 
-async function launchLocalChromium(options: BlackboardBrowserOptions): Promise<Browser> {
+export function validateBlackboardBrowserOptions(options: BlackboardBrowserOptions): void {
+  if (options.channel !== undefined && !["chromium", "chrome", "msedge"].includes(options.channel)) {
+    throw new CliError("--browser-channel must be chromium, chrome, or msedge.", "USAGE", 2);
+  }
+  if (options.cdpUrl && (options.channel || options.executablePath)) {
+    throw new CliError("Choose --browser-cdp-url or a browser channel/executable.", "USAGE", 2);
+  }
+  if (options.cdpUrl) safeCdpUrl(options.cdpUrl);
+}
+
+function safeCdpUrl(value: string): URL {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new CliError("Invalid local CDP endpoint.", "BROWSER_CDP_INVALID", 2); }
+  if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)
+    || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    || url.username || url.password || url.search || url.hash
+    || (url.protocol.startsWith("http") ? url.pathname !== "/" : !url.pathname.startsWith("/devtools/browser/"))) {
+    throw new CliError("CDP endpoints must use loopback HTTP(S) or a loopback browser WebSocket without credentials.", "BROWSER_CDP_INVALID", 2);
+  }
+  return url;
+}
+
+async function resolveCdpEndpoint(value: string): Promise<string> {
+  const url = safeCdpUrl(value);
+  if (url.protocol.startsWith("ws")) return url.toString();
+  let response: Response;
+  try {
+    response = await fetch(new URL("/json/version", url), { redirect: "error", signal: AbortSignal.timeout(DEFAULT_RENDER_TIMEOUT_MS) });
+  } catch {
+    throw new CliError("Local CDP discovery failed.", "BROWSER_CDP_UNAVAILABLE", 1);
+  }
+  if (!response.ok) throw new CliError("Local CDP discovery failed.", "BROWSER_CDP_UNAVAILABLE", 1);
+  const payload = await response.json().catch(() => undefined) as { webSocketDebuggerUrl?: unknown } | undefined;
+  if (typeof payload?.webSocketDebuggerUrl !== "string") {
+    throw new CliError("Local CDP discovery returned no browser endpoint.", "BROWSER_CDP_UNAVAILABLE", 1);
+  }
+  const endpoint = safeCdpUrl(payload.webSocketDebuggerUrl);
+  if (!endpoint.protocol.startsWith("ws") || endpoint.port !== url.port) {
+    throw new CliError("CDP discovery attempted to leave the selected local endpoint.", "BROWSER_CDP_INVALID", 2);
+  }
+  return endpoint.toString();
+}
+
+async function launchLocalChromium(options: BlackboardBrowserOptions, browserType = chromium): Promise<Browser> {
   const headless = !options.interactive;
   const explicitPath = options.executablePath?.trim() || process.env.SUSTECH_BROWSER_EXECUTABLE?.trim();
   const candidates: LaunchOptions[] = [];
-  if (explicitPath) {
+  if (options.channel) {
+    candidates.push({ headless, channel: options.channel });
+  } else if (explicitPath) {
     candidates.push({ headless, executablePath: explicitPath });
   } else {
-    const bundledPath = chromium.executablePath();
+    const bundledPath = browserType.executablePath();
     if (bundledPath && existsSync(bundledPath)) candidates.push({ headless, executablePath: bundledPath });
     candidates.push({ headless, channel: "chrome" });
     candidates.push({ headless, channel: "msedge" });
@@ -276,7 +345,7 @@ async function launchLocalChromium(options: BlackboardBrowserOptions): Promise<B
   let lastMessage = "No supported local Chromium browser was found.";
   for (const candidate of candidates) {
     try {
-      return await chromium.launch(candidate);
+      return await browserType.launch(candidate);
     } catch (error) {
       lastMessage = redactBrowserDiagnostic(error);
     }
@@ -340,7 +409,8 @@ function boundedTimeout(value: number | undefined, fallback: number): number {
 function isCasPage(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.hostname.toLowerCase() === "cas.sustech.edu.cn" || /\/(?:cas|authserver)\//i.test(url.pathname);
+    return url.hostname.toLowerCase() === "cas.sustech.edu.cn" || /\/(?:cas|authserver)\//i.test(url.pathname)
+      || (url.origin === BLACKBOARD_BASE && url.pathname.startsWith("/webapps/login"));
   } catch {
     return false;
   }

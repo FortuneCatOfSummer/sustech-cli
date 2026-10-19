@@ -3,8 +3,10 @@ import { CliError } from "./errors.js";
 import { BookingSession } from "../services/booking-auth.js";
 import {
   createBlackboardBrowserAdapter,
+  PlaywrightBlackboardBrowserRuntime,
   type BlackboardBrowserOptions,
   type BlackboardBrowserRuntime,
+  type BlackboardBrowserSession,
 } from "../services/blackboard-browser.js";
 import { getBlackboardUser } from "../services/blackboard.js";
 import { type ServiceAdapter } from "../services/base.js";
@@ -19,6 +21,7 @@ export type AuthService = "tis" | "bb" | "ws" | "booking" | "lib-booking" | "pms
 export interface BlackboardBrowserAuthOptions extends BlackboardBrowserOptions {
   runtime?: BlackboardBrowserRuntime;
   fetchImpl?: typeof fetch;
+  credentials?: Credentials;
 }
 
 export async function authenticateCredentials(
@@ -79,16 +82,34 @@ export async function authenticateCredentials(
 
 export async function authenticateBlackboardBrowserSession(
   options: BlackboardBrowserAuthOptions = {},
-): Promise<{ authenticated: true; credentialSource: string; identity?: string }> {
+): Promise<{ authenticated: true; credentialSource: string; identity?: string; sessionCached?: boolean }> {
+  let browserSession: BlackboardBrowserSession | undefined;
+  const { runtime = new PlaywrightBlackboardBrowserRuntime(), fetchImpl, credentials, ...browserOptions } = options;
   const adapter = await createBlackboardBrowserAdapter(
-    options,
-    options.runtime,
-    options.fetchImpl,
+    browserOptions,
+    { async authenticate(browserOptions) {
+      browserSession = await runtime.authenticate(browserOptions);
+      return browserSession;
+    } },
+    fetchImpl,
   );
   const user = await getBlackboardUser(adapter);
+  let sessionCached: boolean | undefined;
+  if (credentials && browserSession) {
+    if (user.userName !== credentials.sid) {
+      throw new CliError("The browser login does not match the selected credential profile.", "AUTHENTICATION_FAILED", 2);
+    }
+    const session = new CasSession(credentials, casServiceConfig("bb"));
+    sessionCached = await session.saveBrowserSession(browserSession.cookies.map((cookie) => ({
+      name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, secure: cookie.secure,
+      hostOnly: true,
+      ...(cookie.expires === undefined ? {} : { expiresAt: cookie.expires * 1000 }),
+    })), user.userName!);
+  }
   return {
     authenticated: true,
     credentialSource: "browser-session",
+    ...(sessionCached === undefined ? {} : { sessionCached }),
     ...((user.displayName || user.userName) ? { identity: user.displayName || user.userName } : {}),
   };
 }
@@ -99,6 +120,7 @@ export function casServiceConfig(service: "bb" | "ws"): CasServiceConfig {
       name: "Blackboard",
       baseUrl: "https://bb.sustech.edu.cn",
       serviceUrl: "https://bb.sustech.edu.cn/webapps/bb-sso-BBLEARN/index.jsp",
+      sessionCache: { validationPath: "/learn/api/public/v1/users/me" },
     };
   }
   return {
