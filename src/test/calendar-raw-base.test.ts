@@ -19,6 +19,7 @@ test("accepts an HTTPS mirror override and trims surrounding slashes and spaces"
 test("rejects unsafe or malformed overrides", () => {
   const values = [
     "http://mirror.example/repo",
+    "https://user:secret@mirror.example/repo",
     "https://mirror.example/repo?token=1",
     "https://mirror.example/repo#fragment",
     "not a url",

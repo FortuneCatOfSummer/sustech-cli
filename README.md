@@ -250,10 +250,11 @@ export SUSTECH_CALENDAR_RAW_BASE="https://ghfast.top/https://raw.githubuserconte
 export SUSTECH_ONLINE_RAW_BASE="https://ghfast.top/https://raw.githubusercontent.com/SUSTech-CRA/sustech-online-ng/master"
 ```
 
-Both values must be plain HTTPS URLs without a query string or fragment; when
-unset, the public repositories above are used. Mirrors are third-party services
-and must serve the files directly; the online layer still rejects redirects. See
-[SUSTech Online](docs/ONLINE.md) for the online allowlist details.
+Both values must be plain HTTPS URLs without embedded credentials, a query
+string, or a fragment; when unset, the public repositories above are used.
+Mirrors are third-party services and must serve the files directly; the online
+layer still rejects redirects. See [SUSTech Online](docs/ONLINE.md) for the
+online allowlist details.
 
 ## Updates
 

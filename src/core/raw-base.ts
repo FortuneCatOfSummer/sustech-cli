@@ -5,7 +5,7 @@ export function normaliseHttpsBase(value: string | undefined): string | undefine
   if (!candidate) return undefined;
   try {
     const url = new URL(candidate);
-    if (url.protocol !== "https:" || url.search || url.hash) return undefined;
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return undefined;
   } catch {
     return undefined;
   }
@@ -23,7 +23,7 @@ export function resolveHttpsBase(
   const normalised = normaliseHttpsBase(configured);
   if (!normalised) {
     throw new CliError(
-      `${variable} must be a plain HTTPS URL without a query string or fragment.`,
+      `${variable} must be a plain HTTPS URL without credentials, a query string, or a fragment.`,
       invalidCode,
       2,
       { variable },
