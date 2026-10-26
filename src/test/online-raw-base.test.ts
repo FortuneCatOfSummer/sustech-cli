@@ -18,7 +18,13 @@ const CONTACT_PATH = "docs/contact/README.md";
 
 test("defaults to the public GitHub raw base", () => {
   assert.equal(onlineRawBase({}), DEFAULT_BASE);
-  assert.equal(onlineRawUrl(CONTACT_PATH), `${DEFAULT_BASE}/${CONTACT_PATH}`);
+  const configured = process.env.SUSTECH_ONLINE_RAW_BASE;
+  delete process.env.SUSTECH_ONLINE_RAW_BASE;
+  try {
+    assert.equal(onlineRawUrl(CONTACT_PATH), `${DEFAULT_BASE}/${CONTACT_PATH}`);
+  } finally {
+    if (configured !== undefined) process.env.SUSTECH_ONLINE_RAW_BASE = configured;
+  }
 });
 
 test("accepts an HTTPS mirror override and trims surrounding slashes and spaces", () => {
